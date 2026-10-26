@@ -5,6 +5,7 @@
 /* Engine output -> optional stereo insert -> track level -> master.
  * The bypass retains the original level/pan/spread path exactly. */
 #include "fx.c"
+#include "level_trim.h"                 /* fork: the factory sounds' level matching */
 static int32_t part_storage[CTL],mix_l[CTL],mix_r[CTL];
 static int32_t *part_buf=part_storage;
 static uint8_t fx_send_on;
@@ -275,6 +276,12 @@ static __attribute__((noinline)) void mix_part(track_t *t,uint32_t n)
 #endif
     AP_START(mix_start);
     if(rendered){
+#if !LIBECCIO_MELODEE_DEFAULTS
+        {   /* fork: level matching (level_trim.h): every factory sound at one loudness, before the fader and the sends */
+            uint32_t trim=level_trim_of(t->eng_req,t->preset,t->user!=0u);
+            if(trim!=4096u)for(uint32_t i=0;i<n;i++)part_buf[i]=clamp((int32_t)(((int64_t)part_buf[i]*trim)>>12),-884000,884000);
+        }
+#endif
         mix_solo(t,part_buf,n);
         if(spread_on)mix_spread(t,part_buf,n);
         else{

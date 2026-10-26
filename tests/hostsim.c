@@ -927,6 +927,8 @@ int main(int argc, char **argv)
         transport_req = 1;
     }
     song.master_q12 = 4096;
+    if (getenv("MASTER"))                               /* fork: MASTER=q12, the master volume (the device starts at 2048) */
+        song.master_q12 = atoi(getenv("MASTER"));
     if (getenv("TRACKS")) {
         fclose(w);
         remove(out);

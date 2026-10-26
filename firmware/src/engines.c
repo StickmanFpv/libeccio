@@ -254,6 +254,21 @@ static const uint8_t TRK_DEF_MELODEE[NPART][2] = {{ENGI_PROPHET, 1}, {ENGI_FM6, 
 #else
 #define TRK_DEF TRK_DEF_LIBECCIO
 #endif
+/* fork: a new song's reverb: MASSIVE (HALL) in the shared rack's first slot, and each track's send into it (the bass
+ * a little, the pad more, the drums some), so the reverb is there from the start */
+static const uint8_t TRK_SEND_LIBECCIO[NPART] = {14, 46, 10, 20};
+static void libeccio_song_defaults(void)
+{
+#if !LIBECCIO_MELODEE_DEFAULTS
+    uint32_t k;
+    song.g[G_MFXTYPE] = FX_MASSIVE;
+    song.g[G_MFXMIX] = 127;
+    song.g[G_MFXRATE] = 72;
+    song.g[G_MFXCHAR] = 0;
+    for (k = 0; k < NPART; k++)
+        trk[k].p[P_FXSEND] = TRK_SEND_LIBECCIO[k];
+#endif
+}
 /* track k's power-on engine and preset: TRK_DEF's, a MIDI-only track the MIDI Track's */
 static uint32_t trk_def_engine(uint32_t k) { return k < NPART ? TRK_DEF[k][0] : ENGI_MIDI; }
 static uint32_t trk_def_preset(uint32_t k) { return k < NPART ? TRK_DEF[k][1] : 0u; }

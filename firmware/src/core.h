@@ -218,13 +218,20 @@ static void shared_fx_normalize(int16_t *g)
         int16_t *type=g+G_MFXTYPE+slot*FX_PARAMS;
         if(fx_retired(*type) || fx_is_midi(*type)) *type=FX_OFF;
         if(*type==FX_REVERB){if(reverb)*type=FX_OFF;else reverb=1;}
+        if(*type==FX_MASSIVE){if(reverb&2u)*type=FX_OFF;else reverb|=2u;}   /* fork: one MASSIVE too */
     }
 }
+#define MV_NMODE 8u                     /* fork: MASSIVE's modes (params.c N_MASSIVE, fx_massive.h MV_MODE) */
 static void shared_fx_select(int16_t *g,uint32_t slot,int32_t type)
 {
-    if(type==FX_REVERB)for(uint32_t k=0;k<FX_SLOTS;k++)
-        if(k!=slot && g[G_MFXTYPE+k*FX_PARAMS]==FX_REVERB)g[G_MFXTYPE+k*FX_PARAMS]=FX_OFF;
+    int16_t was=g[G_MFXTYPE+slot*FX_PARAMS];
+    if(type==FX_REVERB || type==FX_MASSIVE)for(uint32_t k=0;k<FX_SLOTS;k++)
+        if(k!=slot && g[G_MFXTYPE+k*FX_PARAMS]==type)g[G_MFXTYPE+k*FX_PARAMS]=FX_OFF;
     g[G_MFXTYPE+slot*FX_PARAMS]=(int16_t)type;
+    if(type==FX_MASSIVE && was!=FX_MASSIVE){   /* fork: MASSIVE starts as a HALL of a fair SIZE (CHAR is its MODE) */
+        g[G_MFXCHAR+slot*FX_PARAMS]=0;
+        g[G_MFXRATE+slot*FX_PARAMS]=72;
+    }
     shared_fx_normalize(g);
 }
 static int param_master_fx(uint32_t id){return id>=G_MFXTYPE && id<=G_MFX3CHAR;}

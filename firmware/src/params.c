@@ -12,7 +12,6 @@ static const char *const N_LTRIG[] = {"NOTE", "FREE"};
 static const char *const N_LPOL[] = {"BI", "UNI"};
 /* SOFT .. FUZZ are one DRIVE, their SHAPE on KNOB 4 (N_SHAPE) */
 static const char *const N_FX[] = {"OFF", "PHASER", "WIDTH", "FORMANT", "TAPE", "SPIT", "", "ROOM", "REVERB", "CHORUS", "NOTE TAIL", "NOTE ECHO", "DRIVE", "DRIVE", "DRIVE", "DRIVE", "CRUSH", "FLANGER", "PEDAL PHASER", "PEDAL CHORUS", "MASSIVE"};
-#define MV_NMODE 8u                       /* fork: MASSIVE's modes (fx_massive.h MV_MODE) */
 static const char *const N_MASSIVE[MV_NMODE] = {"HALL", "NAVE", "SPACE", "ECHO", "CLOUD", "DEEP", "RISE", "DIVE"};   /* hall, cathedral, space, echoes, nebula,
                                                                     * underwater, shimmer up (the NTS-1's RISER), down */
 static const char *const N_NOTE_FX[FX_COUNT] = {"OFF", "", "", "", "", "", "", "", "", "", "NOTE TAIL", "NOTE ECHO", "", "", "", "", "", "", "", "", ""};

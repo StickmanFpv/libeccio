@@ -1312,6 +1312,7 @@ static void project_new_blank(void)
         pat_sig[k] = steps_sig(t);
     }
     undo_depth--;
+    libeccio_song_defaults();                           /* fork: the reverb and the sends */
     undo_clear();
     list_forget();
     proj_cur = PROJ_NO_SLOT;

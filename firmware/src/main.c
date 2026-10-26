@@ -188,6 +188,7 @@ static void melodee_init(void)
         pat_last[i] = 0;
     }
     undo_depth--;
+    libeccio_song_defaults();                 /* fork: the reverb and the sends */
     song.sel = 0;
     song.master_q12 = 2048;
     ui.home = 1;

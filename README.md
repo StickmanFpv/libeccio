@@ -33,7 +33,12 @@ each track's SEND). MIX, SIZE (about a second to about a minute, nearly endless 
 HALL, NAVE (a cathedral: stone, a long predelay, dark), SPACE (huge, wide), ECHO (sparse repeats smearing into a
 cloud), CLOUD (a slow, endless bloom), DEEP (dark and wobbling, underwater), RISE (a shimmer: the tail climbs an octave
 at a time, after the NTS-1's RISER) and DIVE (it sinks, after its SUBMARINE). Eight modulated delay lines at half
-rate, 32 KB while it is on; one at a time.
+rate, 32 KB while it is on; one at a time. A new song starts with it (HALL) in the first slot and the four tracks
+already sending to it.
+
+**Level matching.** Every factory sound of every engine (Melodee's too) plays at one loudness: a gain per sound,
+measured on the host (tools/measure_levels.py, tools/gen_level_trim.py: level_trim.h), at most 12 dB either way and
+never into clipping. Switching sounds or channels no longer jumps in volume; the kits sit 2 dB above the synths.
 
 **Knobs.** On the main page MOOG, SEM and HADES put cutoff, resonance, envelope amount and release on the four knobs
 (VOICE: VOWEL, SHIFT, BUZZ, BREATH; PULSAR: DRIVE, SNAP, SHAOS and SIZE: muffled to thunder). The filter knobs turn like a Minimoog's dial: a slow turn is one step a detent, a
