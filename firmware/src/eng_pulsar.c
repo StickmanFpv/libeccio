@@ -63,7 +63,7 @@ static uint32_t pulsar_decay(const int16_t *p, uint32_t pv)
 {
     switch (pv) {
     case PL_KICK: return (uint32_t)clamp(p[P_E1], 0, 115);
-    case PL_SNARE: return (uint32_t)clamp(p[P_E3], 0, 115);
+    case PL_SNARE: return (uint32_t)clamp(p[P_E3] + 6, 0, 115);
     case PL_HATC: return (uint32_t)clamp(p[P_E4] / 2 + 22, 0, 115);
     case PL_HATO: return (uint32_t)clamp(p[P_E4] + 12, 0, 115);
     case PL_CYM: return (uint32_t)clamp(p[P_E4] + 34, 0, 115);
@@ -99,50 +99,77 @@ static int32_t pulsar_amp(track_t *t, voice_t *v, int32_t adsr)
 /* the metal: six square waves at the classic inharmonic ratios (Hz x 10), summed */
 static const uint16_t PL_METAL[6] = {2053, 3044, 3696, 5227, 5400, 8000};
 
+/* The grit: the Pulsar's channels run hot into analog distortion. a 0..127 (DRIVE, more on some voices):
+ *   up to 64   a tanh drive, x1 .. x6 (warm to saturated)
+ *   64 .. 127  harder (to x21), a wavefolder blended in (a clipper folding over: the rasp), and a bias that makes it
+ *              asymmetric (even harmonics: the industrial edge). The part's DC blocker (post) takes the bias out.
+ * x up to +-65536; the result +-32767 */
+static inline __attribute__((always_inline)) int32_t pulsar_grit(int32_t x, int32_t a)
+{
+    int32_t g = 4096 + a * a * 5, d = (int32_t)(((int64_t)x * g) >> 12), y = softclip(d);
+    if (a > 64) {
+        int32_t f = d + (a - 64) * 160;
+        uint32_t u = (uint32_t)(f + 32768) & 0x1FFFFu;         /* a triangle fold, period 4 x 32768 */
+        int32_t fold = u < 65536u ? (int32_t)u - 32768 : 98303 - (int32_t)u;
+        y += mulq15(fold - y, (a - 64) * 260);                 /* up to half folded */
+    }
+    return y;
+}
+
 static void pulsar_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
     const int16_t *p = t->p;
     uint32_t pv = (uint32_t)v->s[3], i;
-    int32_t sweep = v->s[1], ic1 = v->s[4], ic2 = v->s[5];
-    int32_t drive = 4096 + p[P_E6] * p[P_E6] / 2;          /* Q12: x1 .. x9, a squared knob */
+    int32_t sweep = v->s[1], ic1 = v->s[4], ic2 = v->s[5], dr = p[P_E6];
     uint32_t ph0 = v->ph[0], ph1 = v->ph[1], ph2 = v->ph[2];
     tsvf_t f;
     switch (pv) {
     case PL_KICK: {
-        /* base 30..80 Hz (KICK), the sweep starts 4 octaves up and falls in about 40 ms */
+        /* base 30..80 Hz (KICK); the sweep starts 5 octaves up and falls in about 40 ms; a noise click and a
+         * square's edge on the attack, then the sine through the grit: the drive turns the tail into a growl */
         int32_t base10 = 300 + p[P_E0] * 4;                /* Hz x 10 */
         uint32_t inc0 = pulsar_hz(base10), incs;
-        int32_t sw = sweep >> 12;                           /* Q12 */
-        incs = inc0 + (uint32_t)(((uint64_t)inc0 * 15u * (uint32_t)((sw * sw) >> 12)) >> 12);
+        int32_t sw = sweep >> 12, click = sweep > (13 << 20) ? (sweep >> 9) - 26624 : 0;   /* Q12; click Q15 */
+        incs = inc0 + (uint32_t)(((uint64_t)inc0 * 31u * (uint32_t)((sw * sw) >> 12)) >> 12);
         for (i = 0; i < n; i++) {
-            int32_t s = osc_sine(ph0);
-            if (sweep > (15 << 20)) {                       /* the click: the first few ms */
-                int32_t c = (int32_t)(noise32(&v->s[2]) >> 18) - 8192;
-                s += mulq15(c, (sweep >> 9) - 30720 > 0 ? (sweep >> 9) - 30720 : 0);
+            int32_t s = osc_sine(ph0) + (osc_sine(ph0 * 2u) >> 3);   /* (a little second harmonic: the punch) */
+            if (click > 0) {
+                int32_t c = (int32_t)(noise32(&v->s[2]) >> 17) - 16384 + ((int32_t)(ph0 >> 31) ? -12000 : 12000);
+                s += mulq15(c, click);
             }
-            s = softclip((s * drive) >> 12);
+            s = pulsar_grit(s, clamp(dr - 8, 0, 127));
             ph0 += incs;
             out[i] += voice_amp(s, m, i) << 1;
         }
-        sweep -= mulq16(sweep, 3300);                       /* about 40 ms to -24 dB */
+        sweep -= mulq16(sweep, 3300);
         break;
     }
     case PL_SNARE: {
-        /* two tones (185 and 330 Hz) dropping a little, and noise band-passed around 2.5 kHz; SNAP mixes them */
-        int32_t snap = p[P_E2] * 258, tone = 32767 - snap, sw = sweep >> 13;
-        uint32_t inc0 = pulsar_hz(1850 + (sw * 900 >> 11)), inc1 = pulsar_hz(3300 + (sw * 1300 >> 11));
-        int32_t k = 4096 + 2048;
-        tsvf_coef_k(&f, 106 << 8, k);
+        /* body: two triangles (180 and 290 Hz) an octave up at the hit and falling in ~15 ms, fading with the sweep;
+         * the snap: noise through a resonant band that sweeps down from ~6 kHz, plus its highs; the rattle: noise
+         * ring-modulated by a 410 Hz square (the metal in it). SNAP moves it from a thudding tom to a noise crack;
+         * the grit runs hotter than the kick's: the snare is where the Pulsar's distortion lives */
+        int32_t snap = p[P_E2], sw = sweep >> 12, body = 32767 - snap * 180, nzl = 1500 + snap * snap * 3 / 2;
+        int32_t bamp = 9000 + (sweep >> 9), rat = (snap * (600 + dr * 12)) >> 6, k = 4096 + 700, cut;
+        uint32_t oct = (uint32_t)((sw * sw) >> 12), inc0 = pulsar_hz(1800), inc1 = pulsar_hz(2900), inc2 = pulsar_hz(4100);
+        inc0 += (uint32_t)(((uint64_t)inc0 * oct) >> 12);
+        inc1 += (uint32_t)(((uint64_t)inc1 * oct) >> 12);
+        cut = clamp((82 << 8) + (sweep >> 11) * 4, 0, 125 << 8);   /* the crack sweeps down into the mids */
+        tsvf_coef_k(&f, cut, k);
+        body = mulq15(body, bamp > 32767 ? 32767 : bamp);
         for (i = 0; i < n; i++) {
-            int32_t nz = (int32_t)(noise32(&v->s[2]) >> 16) - 32768, lp, bp, hp, s;
+            int32_t nz = (int32_t)(noise32(&v->s[2]) >> 16) - 32768, lp, bp, hp, s, tone, rattle;
             pulsar_svf(&f, k, nz, &ic1, &ic2, &lp, &bp, &hp);
-            s = mulq15((osc_sine(ph0) + osc_sine(ph1)) >> 1, tone) + mulq15(clamp(bp + hp / 2, -40000, 40000), snap);
-            s = softclip((s * drive) >> 12);
+            tone = (osc_tri(ph0) + osc_tri(ph1)) >> 1;
+            rattle = (int32_t)(ph2 >> 31) ? nz >> 1 : -(nz >> 1);
+            s = mulq15(tone, body) + mulq15(clamp(bp * 2 + hp, -60000, 60000), nzl) + mulq15(rattle, rat);
+            s = pulsar_grit(s, clamp(dr + 14, 0, 127));
             ph0 += inc0;
             ph1 += inc1;
+            ph2 += inc2;
             out[i] += voice_amp(s, m, i) << 1;
         }
-        sweep -= mulq16(sweep, 2000);
+        sweep -= mulq16(sweep, 1400);
         break;
     }
     case PL_HATC: case PL_HATO: case PL_CYM: {
@@ -158,24 +185,24 @@ static void pulsar_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
             for (j = 0; j < 6; j++)
                 sum += (int32_t)((c * inc[j]) >> 31) ? -5000 : 5000;
             pulsar_svf(&f, k, sum + nz, &ic1, &ic2, &lp, &bp, &hp);
-            s = softclip((hp * drive) >> 12);
+            s = pulsar_grit(hp, dr / 2 + 20);
             out[i] += voice_amp(s, m, i);
         }
         ph0 = c;
         break;
     }
     default: {
-        /* BASS: the note's pitch, an octave drop in the first ~20 ms; triangle and square through a low-pass that
-         * opens with the sweep and the drive */
-        int32_t sw = sweep >> 12, cut, k = 4096 + 1500;
+        /* BASS: the note's pitch, an octave drop in the first ~20 ms; triangle and square through a resonant low-pass
+         * that opens with the sweep and the drive, then the grit */
+        int32_t sw = sweep >> 12, cut, k = 4096 + 1100;
         uint32_t inc0 = m->inc + (uint32_t)(((uint64_t)m->inc * (uint32_t)((sw * sw) >> 12)) >> 12);
-        cut = clamp(40 * 256 + (sweep >> 11) * 5 + p[P_E6] * 64, 0, 127 * 256);
+        cut = clamp(44 * 256 + (sweep >> 11) * 5 + dr * 64, 0, 127 * 256);
         tsvf_coef_k(&f, cut, k);
         for (i = 0; i < n; i++) {
-            int32_t sq = (int32_t)(ph0 >> 31) ? -20000 : 20000, s, lp, bp, hp;
+            int32_t sq = (int32_t)(ph0 >> 31) ? -24000 : 24000, s, lp, bp, hp;
             s = (osc_tri(ph0) + sq) >> 1;
             pulsar_svf(&f, k, s, &ic1, &ic2, &lp, &bp, &hp);
-            s = softclip((lp * drive) >> 12);
+            s = pulsar_grit(lp, dr);
             ph0 += inc0;
             out[i] += voice_amp(s, m, i) << 1;
         }
@@ -191,16 +218,22 @@ static void pulsar_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     v->ph[2] = ph2;
 }
 
-/* the part's sum, after its voices: the glue. DRIVE also pushes the whole kit into a soft clipper, so hits
- * squash together the way a hot analog bus does; quiet passages stay clean */
+/* the part's sum, after its voices: a DC blocker (the grit's bias), then the glue: DRIVE pushes the whole kit into
+ * a soft clipper with make-up gain, so hits squash together the way a hot analog bus does (x1.4 .. x3.3 in) */
+static int32_t pulsar_dc[NPART][2];
 static void pulsar_post(track_t *t, int32_t *out, uint32_t n, uint32_t nr)
 {
-    int32_t g = 4096 + t->p[P_E6] * 24, i;                  /* Q12: x1 .. x1.75 */
+    uint32_t part = (uint32_t)(t - trk) % NPART, i;
+    int32_t g = 5600 + t->p[P_E6] * 62, xin = pulsar_dc[part][0], yo = pulsar_dc[part][1];   /* Q12 */
     (void)nr;
-    for (i = 0; i < (int32_t)n; i++) {
-        int32_t x = (int32_t)(((int64_t)out[i] * g) >> 13);   /* half scale into the clipper */
-        out[i] = softclip(x) * 2;
+    for (i = 0; i < n; i++) {
+        int32_t x = out[i], y = x - xin + yo - (yo >> 9);                   /* ~14 Hz high-pass */
+        xin = x;
+        yo = y;
+        out[i] = softclip((int32_t)(((int64_t)y * g) >> 13)) * 2;            /* half scale in, x2 out */
     }
+    pulsar_dc[part][0] = xin;
+    pulsar_dc[part][1] = yo;
 }
 
 static const preset_t PULSAR_PRESETS[] = {
