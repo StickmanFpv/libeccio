@@ -379,6 +379,8 @@ static const param_desc_t *track_desc(const track_t *t, uint32_t id)
         degree.max = (int16_t)scale_count(t);
         return &degree;
     }
+    if (t->eng_req == ENGI_PULSAR && id >= P_ATK && id <= P_REL)   /* fork: PULSAR's ENV page: its four decays */
+        return &PULSAR_DEC[id - P_ATK];
     if (id >= P_E0 && id <= P_E7) {                   /* the engine asked for (t->engine follows after a fade) */
         const engine_t *e = ENGINES[eng_idx(t->eng_req)];
         const param_desc_t *d = e->desc ? e->desc(t, id - P_E0) : 0;   /* a mode-dependent label / names */

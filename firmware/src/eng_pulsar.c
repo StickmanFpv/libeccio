@@ -1,39 +1,56 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* PULSAR: big, driven drums after the sound of SOMA's Pulsar-23 (original DSP: no circuit model, no samples).
- * Four voices, chosen by the note as the General MIDI drum map plays them, so the KO II and the keys both work:
- *   KICK   35 36           a sine with a fast pitch sweep and a click, a long sub tail
- *   SNARE  37 38 39 40     two pitched tones and a band of noise, SNAP between them
- *   METAL  42 44 (closed), 46 (open), 49 51 52 55 57 59 (cymbal): six square waves at inharmonic ratios and noise,
- *                          high-passed (the classic metal), the open and cymbal ring for METAL's time
- *   BASS   every other note: a pitched percussive bass (triangle and square with a pitch drop, a low-pass that
- *                          closes with it): playable as a bass line from the KO II
- * SUST (the Pulsar's sustaining envelopes): above 0, a held key keeps its voice at that level, so any drum becomes a
- * drone (a kick held is a sub drone, a cymbal held a hiss bed); 0 = plain hits, the key's length does not matter.
- * DRIVE saturates each voice and the part's sum (post): from warm to pulverised.
- * SHAOS (after the Pulsar's SHift + chAOS): a 16-bit shift register per part, stepped once a hit. Its top bit comes
- * back in at the bottom, flipped now and then: rarely at low SHAOS, so the variations repeat as a loop (a few bits
- * change, the loop mutates slowly), often at high SHAOS, where it is noise. Three taps of the register vary each hit,
- * as deep as SHAOS: the kick's pitch and drive, the snare's SNAP, pitch and drive, the metal's tuning and tone, the
- * bass's filter and drive, and every voice's decay. SHAOS 0: every hit the same. The BASS voice decays as the KICK.
- * Voice state: s[0] the amplitude (Q24), s[1] the pitch sweep (Q24), s[2] noise, s[3] the voice (PL_*, bits 0..7)
- * and its three SHAOS values (signed bytes, bits 8..15, 16..23, 24..31), s[4] s[5] the voice's filter. */
-enum { PL_KICK, PL_BASS, PL_SNARE, PL_HATC, PL_HATO, PL_CYM };
+ * Four channels, chosen by the note as the General MIDI drum map plays them, so the K.O. II and the keys both work:
+ *   BD     35 36           a sine with a tune envelope (DROP: how far and how long it drops), a click, the grit;
+ *                          from sub booms to distorted industrial thumps; SHP (the host's) rings it metallic
+ *   SD     38 (snare), 40 (a higher, noisier one), 37 (rimshot), 39 (clap): a tunable drum (SNARE) of three membrane
+ *                          partials (1, 1.59, 2.14 of the pitch, the higher ones dying first) with its own pitch drop,
+ *                          noise through a resonant band that sweeps down, a rattle (noise ring-modulated by a square);
+ *                          SNAP from a hollow tom-like body to a noise burst
+ *   HH     42 44 (closed), 46 (open), 49 51 52 55 57 59 (cymbals): TONE moves through three sources: six square
+ *                          waves at inharmonic ratios (the classic metal), the same squares ring-modulated in pairs
+ *                          (ringing metal), then a digital noise register run at a crushed rate (lo-fi digital
+ *                          texture); high-passed, the grit
+ *   BASS   every other note (toms 41 43 45 47 48 50, and any pitch): the note's pitch, a pitch drop (DROP), triangle,
+ *                          square and a sub square through a resonant low-pass (TONE: from a round tom to a screaming
+ *                          resonant lead)
+ * The decays are on the ENV page (the host's ATK DEC SUS REL, unused by hits, named K.DEC S.DEC M.DEC B.DEC here).
+ * SUST (the Pulsar's sustaining envelopes): above 0, a held key keeps its voice at that level: any channel becomes a
+ * drone or a synth voice. DRIVE: each voice's grit and the bus (post): warm to pulverised.
+ * SHAOS (SHift + chAOS): a 16-bit shift register per part, stepped once a hit, its top bit back in at the bottom,
+ * flipped now and then: rarely at low SHAOS (the variations loop and slowly mutate), often at high SHAOS (noise).
+ * Three taps vary each hit as deep as SHAOS: pitches, SNAP, tuning, tone, drive and every decay.
+ * The host's modulation reaches the drums: PIT (LFO, ENV, the matrix: S&H, random) bends every channel's pitch, FLT
+ * moves the snare's band, the metal's and the bass's filters, SHP the kick's ring and the metal's ring-modulation.
+ * Voice state: s[0] the amplitude (Q24), s[1] the tune envelope (Q24, also the body's envelope), s[2] noise, s[3] the
+ * channel (PL_*, bits 0..7) and its three SHAOS values (signed bytes), s[4] s[5] the voice's filter. ph[]: the
+ * oscillators (the metal: ph[0] counts samples since the hit). */
+enum { PL_KICK, PL_BASS, PL_SNARE, PL_HATC, PL_HATO, PL_CYM, PL_SNARE2, PL_RIM, PL_CLAP };
 
 static uint32_t pulsar_voice_of(uint32_t note)
 {
     switch (note) {
     case 35: case 36: return PL_KICK;
-    case 37: case 38: case 39: case 40: return PL_SNARE;
+    case 37: return PL_RIM;
+    case 38: return PL_SNARE;
+    case 39: return PL_CLAP;
+    case 40: return PL_SNARE2;
     case 42: case 44: return PL_HATC;
     case 46: return PL_HATO;
     case 49: case 51: case 52: case 55: case 57: case 59: return PL_CYM;
     default: return PL_BASS;
     }
 }
+static int pulsar_is_snare(uint32_t pv) { return pv == PL_SNARE || pv == PL_SNARE2 || pv == PL_RIM || pv == PL_CLAP; }
+static int pulsar_is_metal(uint32_t pv) { return pv == PL_HATC || pv == PL_HATO || pv == PL_CYM; }
 
 static inline uint32_t pulsar_hz(int32_t hz10)         /* phase increment of hz10 / 10 Hz at 44.1 kHz */
 {
     return (uint32_t)hz10 * 9739u;                         /* 2^32 / 44100 / 10 = 9739.1 */
+}
+static inline uint32_t pulsar_scale(uint32_t inc, uint32_t q16)   /* inc x q16 / 65536 */
+{
+    return (uint32_t)(((uint64_t)inc * q16) >> 16);
 }
 
 /* the trapezoidal SVF of dsp.c, one sample: the low, band and high outputs */
@@ -79,25 +96,27 @@ static void pulsar_note_on(track_t *t, voice_t *v)
     uint32_t lane = (uint32_t)(v - t->v);
     v->s[3] = (int32_t)(pulsar_voice_of(v->note) | shaos_step((uint32_t)(t - trk), t->p[P_E5]));
     v->s[0] = 1 << 24;                                    /* every hit starts at full level */
-    v->s[1] = 1 << 24;                                    /* and at the top of its sweep */
+    v->s[1] = 1 << 24;                                    /* and at the top of its tune envelope */
     if (!v->s[2])
         v->s[2] = (int32_t)(0x1234567u + lane * 0x9E3779B9u);
     v->s[4] = v->s[5] = 0;
     v->ph[0] = v->ph[1] = v->ph[2] = 0;                   /* drums start in phase: the kick's first cycle is its punch */
-    (void)t;
 }
 
-/* the decay time (ENV_EXP index) of a voice: at most about 3 s, so every hit dies away; SHAOS moves it */
+/* the decay time (ENV_EXP index) of a voice, from the ENV page (K.DEC S.DEC M.DEC B.DEC); at most about 3 s, so every
+ * hit dies away; SHAOS moves it */
 static uint32_t pulsar_decay(const int16_t *p, const voice_t *v)
 {
     int32_t d, sh = shaos_m(v, 3) / 6;
     switch ((uint32_t)v->s[3] & 0xFFu) {
-    case PL_KICK: d = p[P_E1]; break;
-    case PL_SNARE: d = p[P_E3] + 6; break;
-    case PL_HATC: d = p[P_E4] / 2 + 22; break;
-    case PL_HATO: d = p[P_E4] + 12; break;
-    case PL_CYM: d = p[P_E4] + 34; break;
-    default: d = p[P_E1] - 10; break;               /* BASS: as the kick */
+    case PL_KICK: d = p[P_ATK]; break;
+    case PL_SNARE: case PL_SNARE2: d = p[P_DEC] + 6; break;
+    case PL_RIM: d = p[P_DEC] / 2 + 10; break;
+    case PL_CLAP: d = p[P_DEC] + 2; break;
+    case PL_HATC: d = p[P_SUS] / 2 + 22; break;
+    case PL_HATO: d = p[P_SUS] + 12; break;
+    case PL_CYM: d = p[P_SUS] + 34; break;
+    default: d = p[P_REL]; break;
     }
     return (uint32_t)clamp(d + sh, 0, 115);
 }
@@ -115,7 +134,7 @@ static int32_t pulsar_amp(track_t *t, voice_t *v, int32_t adsr)
         e = hold;                                          /* a drone while held */
     else
         e -= mulq16(e, ENV_EXP[pulsar_decay(p, v)]);
-    if (e < (1 << 15)) {                                /* -54 dB: done */
+    if (e < (1 << 15)) {                                   /* -54 dB: done */
         v->active = v->gate = 0;
         v->stage = 0;
         v->env = 0;
@@ -127,13 +146,13 @@ static int32_t pulsar_amp(track_t *t, voice_t *v, int32_t adsr)
     return e >> 9;                                         /* Q15 */
 }
 
-/* the metal: six square waves at the classic inharmonic ratios (Hz x 10), summed */
+/* the metal: six square waves at the classic inharmonic ratios (Hz x 10) */
 static const uint16_t PL_METAL[6] = {2053, 3044, 3696, 5227, 5400, 8000};
 
-/* The grit: the Pulsar's channels run hot into analog distortion. a 0..127 (DRIVE, more on some voices):
+/* The grit: the Pulsar's channels run hot into analog distortion. a 0..127:
  *   up to 64   a tanh drive, x1 .. x6 (warm to saturated)
  *   64 .. 127  harder (to x21), a wavefolder blended in (a clipper folding over: the rasp), and a bias that makes it
- *              asymmetric (even harmonics: the industrial edge). The part's DC blocker (post) takes the bias out.
+ *              asymmetric (even harmonics: the industrial edge). The bus's DC blocker (post) takes the bias out.
  * x up to +-65536; the result +-32767 */
 static inline __attribute__((always_inline)) int32_t pulsar_grit(int32_t x, int32_t a)
 {
@@ -152,95 +171,128 @@ static void pulsar_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     const int16_t *p = t->p;
     uint32_t pv = (uint32_t)v->s[3] & 0xFFu, i;
     int32_t sweep = v->s[1], ic1 = v->s[4], ic2 = v->s[5], m1 = shaos_m(v, 1), m2 = shaos_m(v, 2);
-    int32_t dr = clamp(p[P_E6] + m2 / 3, 0, 127);
-    uint32_t ph0 = v->ph[0], ph1 = v->ph[1], ph2 = v->ph[2];
+    int32_t dr = clamp(p[P_E6] + m2 / 3, 0, 127), punch = p[P_E1], timbre = p[P_E4];
+    int32_t bend = clamp(m->pitch16 - v->pitch16, -24 * 16, 24 * 16);   /* the host's PIT: LFO, ENV, the matrix */
+    int32_t flt = m->cutoff, shp = m->shape - 64 * 256;                  /* FLT (0..127 << 8), SHP around its middle */
+    uint32_t ph0 = v->ph[0], ph1 = v->ph[1], ph2 = v->ph[2], bq = pow2_q16(bend);
     tsvf_t f;
-    switch (pv) {
-    case PL_KICK: {
-        /* base 30..80 Hz (KICK); the sweep starts 5 octaves up and falls in about 40 ms; a noise click and a
-         * square's edge on the attack, then the sine through the grit: the drive turns the tail into a growl */
-        int32_t base10 = clamp(300 + p[P_E0] * 4 + m1 * 2, 200, 1100);   /* Hz x 10; SHAOS: +-25 Hz */
-        uint32_t inc0 = pulsar_hz(base10), incs;
-        int32_t sw = sweep >> 12, click = sweep > (13 << 20) ? (sweep >> 9) - 26624 : 0;   /* Q12; click Q15 */
-        incs = inc0 + (uint32_t)(((uint64_t)inc0 * 31u * (uint32_t)((sw * sw) >> 12)) >> 12);
+    if (pv == PL_KICK) {
+        /* KICK 30..90 Hz; DROP: the drop from 1 to 6 octaves up, in 15 to 70 ms; a click and a square's edge on the
+         * attack; SHP rings it (a partial at 2.76 times, ring-modulated); the grit turns the tail into a growl */
+        int32_t base10 = clamp(300 + p[P_E0] * 5 + m1 * 2, 200, 1400);
+        uint32_t inc0 = pulsar_scale(pulsar_hz(base10), bq), incs, depth = 1u + (uint32_t)punch * 62u / 127u;
+        int32_t sw = sweep >> 12, click = sweep > (13 << 20) ? (sweep >> 9) - 26624 : 0;
+        int32_t ring = shp > 0 ? shp >> 1 : 0;              /* Q15 */
+        incs = inc0 + (uint32_t)(((uint64_t)inc0 * depth * (uint32_t)((sw * sw) >> 12)) >> 12);
         for (i = 0; i < n; i++) {
-            int32_t s = osc_sine(ph0) + (osc_sine(ph0 * 2u) >> 3);   /* (a little second harmonic: the punch) */
+            int32_t s = osc_sine(ph0) + (osc_sine(ph0 * 2u) >> 3);
+            if (ring)
+                s += mulq15(mulq15(s, osc_sine(ph1)), ring);
             if (click > 0) {
                 int32_t c = (int32_t)(noise32(&v->s[2]) >> 17) - 16384 + ((int32_t)(ph0 >> 31) ? -12000 : 12000);
                 s += mulq15(c, click);
             }
             s = pulsar_grit(s, clamp(dr - 8, 0, 127));
             ph0 += incs;
+            ph1 += pulsar_scale(incs, 180879u);              /* x 2.76 */
             out[i] += voice_amp(s, m, i) << 1;
         }
-        sweep -= mulq16(sweep, 3300);
-        break;
-    }
-    case PL_SNARE: {
-        /* body: two triangles (180 and 290 Hz) an octave up at the hit and falling in ~15 ms, fading with the sweep;
-         * the snap: noise through a resonant band that sweeps down from ~6 kHz, plus its highs; the rattle: noise
-         * ring-modulated by a 410 Hz square (the metal in it). SNAP moves it from a thudding tom to a noise crack;
-         * the grit runs hotter than the kick's: the snare is where the Pulsar's distortion lives */
-        int32_t snap = clamp(p[P_E2] + m1 / 2, 0, 127), sw = sweep >> 12, body = 32767 - snap * 180, nzl = 1500 + snap * snap * 3 / 2;
-        int32_t bamp = 9000 + (sweep >> 9), rat = (snap * (600 + dr * 12)) >> 6, k = 4096 + 700, cut;
-        uint32_t oct = (uint32_t)((sw * sw) >> 12), inc0 = pulsar_hz(1800 + m2 * 4), inc1 = pulsar_hz(2900 + m2 * 6), inc2 = pulsar_hz(4100 + m1 * 8);
-        inc0 += (uint32_t)(((uint64_t)inc0 * oct) >> 12);
-        inc1 += (uint32_t)(((uint64_t)inc1 * oct) >> 12);
-        cut = clamp((82 << 8) + (sweep >> 11) * 4, 0, 125 << 8);   /* the crack sweeps down into the mids */
+        sweep -= mulq16(sweep, (uint32_t)(5200 - punch * 30));
+    } else if (pulsar_is_snare(pv)) {
+        /* SNARE 120..420 Hz (the rimshot 1.8 times, the second snare 1.25 times); three partials of a membrane, the
+         * higher ones dying first (the tune envelope squared and cubed); a pitch drop (up to a fifth with DROP);
+         * the noise band sweeps down from the crack into the mids; the rattle; SNAP balances body and noise.
+         * The clap: three noise bursts 11 ms apart, then the band's tail. The grit runs hotter than the kick's */
+        int32_t base10 = clamp(1200 + p[P_E2] * 24 + m1 * 6, 800, 4400);
+        int32_t snap = clamp(p[P_E3] + m1 / 2, 0, 127), sw = sweep >> 12, k = 4096 + 700, cut;
+        int32_t body = 32767 - snap * 190, nzl = 1500 + snap * snap * 3 / 2, rat = (snap * (600 + dr * 12)) >> 6;
+        int32_t e1 = sweep >> 9, e2 = (e1 * e1) >> 15;     /* the upper partials' envelopes, Q15 (the fundamental rings
+                                                            * with the voice's own amplitude) */
+        uint32_t drop, inc0, inc1, inc3, c = ph2;
+        if (pv == PL_RIM) { base10 = base10 * 9 / 5; nzl /= 3; body = 32767; }
+        else if (pv == PL_SNARE2) { base10 = base10 * 5 / 4; nzl = nzl * 3 / 2; }
+        else if (pv == PL_CLAP) { body = 2000; nzl = 30000; rat = 0; k = 4096 + 1800; }
+        drop = 65536u + (uint32_t)(((int64_t)(sw * sw >> 12) * (punch * 196)) >> 12);   /* up to x1.5 */
+        inc0 = pulsar_scale(pulsar_scale(pulsar_hz(base10), bq), drop);
+        inc1 = pulsar_scale(inc0, 104399u);                  /* x 1.593 */
+        inc3 = pulsar_scale(inc0, 150733u);                  /* x 2.30: the rattle's square */
+        cut = clamp((82 << 8) + (sweep >> 11) * 4 + (flt >> 1), 40 << 8, 125 << 8);
+        if (pv == PL_CLAP) cut = clamp((96 << 8) + (flt >> 1), 60 << 8, 122 << 8);
         tsvf_coef_k(&f, cut, k);
-        body = mulq15(body, bamp > 32767 ? 32767 : bamp);
-        for (i = 0; i < n; i++) {
+        for (i = 0; i < n; i++, c++) {
             int32_t nz = (int32_t)(noise32(&v->s[2]) >> 16) - 32768, lp, bp, hp, s, tone, rattle;
+            if (pv == PL_CLAP && c < 1460u) {                /* the bursts: 0, 11, 22 ms, each 8 ms falling */
+                uint32_t b = c % 485u;
+                nz = b < 360u ? mulq15(nz, 32767 - (int32_t)b * 91) : 0;
+            }
             pulsar_svf(&f, k, nz, &ic1, &ic2, &lp, &bp, &hp);
-            tone = (osc_tri(ph0) + osc_tri(ph1)) >> 1;
-            rattle = (int32_t)(ph2 >> 31) ? nz >> 1 : -(nz >> 1);
+            /* the partials: the fundamental, x1.593 and (the sum of their phases) x2.593 ~ the 2.14 / 2.30 region */
+            tone = mulq15(osc_sine(ph0), 11000 + (e1 >> 1)) + (mulq15(osc_sine(ph1), e1) >> 1) +
+                   (mulq15(osc_tri(ph1 + ph0), e2) >> 2);
+            rattle = (int32_t)((c * inc3) >> 31) ? nz >> 1 : -(nz >> 1);
             s = mulq15(tone, body) + mulq15(clamp(bp * 2 + hp, -60000, 60000), nzl) + mulq15(rattle, rat);
             s = pulsar_grit(s, clamp(dr + 14, 0, 127));
             ph0 += inc0;
             ph1 += inc1;
-            ph2 += inc2;
             out[i] += voice_amp(s, m, i) << 1;
         }
-        sweep -= mulq16(sweep, 1400);
-        break;
-    }
-    case PL_HATC: case PL_HATO: case PL_CYM: {
-        /* the six squares need no stored phases: ph[0] counts the samples since the hit, and a square's phase is that
-         * count times its increment (mod 2^32, exactly as an accumulator would hold it). High-passed, with noise */
-        uint32_t inc[6], j, c = ph0;
-        int32_t k = 4096 + 1024;
+        ph2 = c;
+        sweep -= mulq16(sweep, pv == PL_RIM ? 3000u : 1400u);
+    } else if (pulsar_is_metal(pv)) {
+        /* TONE 0..42: the six squares; 43..85: also ring-modulated in pairs (ringing metal); 86..127: a 15-bit
+         * noise register run at a crushed rate (lo-fi digital). ph[0] counts the samples since the hit (a square's
+         * phase is that count times its increment), ph[1] the register, ph[2] its hold. SHAOS and PIT retune */
+        uint32_t inc[6], j, cnt = ph0, reg = ph1 ? ph1 : 0x4001u, hold = ph2;
+        int32_t k = 4096 + 1024, ringmix = clamp((timbre - 42) * 780 + (shp > 0 ? shp : 0), 0, 32767);
+        int32_t dig = clamp((timbre - 85) * 780, 0, 32767);
+        uint32_t crush = 1u + (uint32_t)clamp(timbre - 85, 0, 42) / 3u;   /* hold 1 .. 15 samples */
         for (j = 0; j < 6; j++)
-            inc[j] = pulsar_hz((int32_t)PL_METAL[j] * (pv == PL_CYM ? 3 : 4) / 4 * (256 + m1) / 256);   /* SHAOS: +-50 % */
-        tsvf_coef_k(&f, clamp((pv == PL_CYM ? 112 : 118) * 256 + m2 * 24, 90 << 8, 125 << 8), k);
-        for (i = 0; i < n; i++, c++) {
-            int32_t sum = 0, nz = (int32_t)(noise32(&v->s[2]) >> 17) - 16384, lp, bp, hp, s;
-            for (j = 0; j < 6; j++)
-                sum += (int32_t)((c * inc[j]) >> 31) ? -5000 : 5000;
+            inc[j] = pulsar_scale(pulsar_hz((int32_t)PL_METAL[j] * (pv == PL_CYM ? 3 : 4) / 4 * (256 + m1) / 256), bq);
+        int32_t nzg = 32767 - timbre * 200;                 /* the white noise gives way to the other sources */
+        uint32_t tap = timbre > 105 ? 6u : 14u;              /* past 105: a 7-bit register, periodic: a pitched buzz */
+        tsvf_coef_k(&f, clamp((pv == PL_CYM ? 112 : 118) * 256 - timbre * 64 + m2 * 24 + (flt >> 2), 70 << 8, 125 << 8), k);
+        for (i = 0; i < n; i++, cnt++) {
+            int32_t sq[6], sum = 0, nz = mulq15((int32_t)(noise32(&v->s[2]) >> 17) - 16384, nzg), lp, bp, hp, s, rm, dn;
+            for (j = 0; j < 6; j++) {
+                sq[j] = (int32_t)((cnt * inc[j]) >> 31) ? -5000 : 5000;
+                sum += sq[j];
+            }
+            rm = ((sq[0] * sq[3]) >> 12) + ((sq[1] * sq[4]) >> 12) + ((sq[2] * sq[5]) >> 12);   /* +-18310 */
+            sum += mulq15(rm * 2 - sum, ringmix);
+            if (dig) {                                        /* the register: a step every crush samples */
+                if (++hold >= crush) {
+                    uint32_t bit = (reg ^ (reg >> 1)) & 1u;
+                    reg = ((reg >> 1) | (bit << tap)) & 0x7FFFu;
+                    hold = 0;
+                }
+                dn = (int32_t)(reg & 1u) ? 20000 : -20000;
+                sum += mulq15(dn - sum, dig);
+            }
             pulsar_svf(&f, k, sum + nz, &ic1, &ic2, &lp, &bp, &hp);
             s = pulsar_grit(hp, dr / 2 + 20);
             out[i] += voice_amp(s, m, i);
         }
-        ph0 = c;
-        break;
-    }
-    default: {
-        /* BASS: the note's pitch, an octave drop in the first ~20 ms; triangle and square through a resonant low-pass
-         * that opens with the sweep and the drive, then the grit */
-        int32_t sw = sweep >> 12, cut, k = 4096 + 1100;
-        uint32_t inc0 = m->inc + (uint32_t)(((uint64_t)m->inc * (uint32_t)((sw * sw) >> 12)) >> 12);
-        cut = clamp(44 * 256 + (sweep >> 11) * 5 + dr * 64 + m1 * 40, 0, 127 * 256);
+        ph0 = cnt;
+        ph1 = reg;
+        ph2 = hold;
+    } else {
+        /* BASS: the note's pitch (and PIT); DROP: a drop of up to two octaves in the first ~20 ms; triangle, square
+         * and a sub square an octave down through a low-pass that opens with the drop, the drive and FLT; TONE:
+         * its resonance, from a round tom to a screaming lead */
+        int32_t sw = sweep >> 12, cut, k = 4096 + 2400 - timbre * 30;
+        uint32_t inc0 = m->inc + (uint32_t)(((uint64_t)m->inc * ((uint32_t)punch * 3u / 127u) * (uint32_t)((sw * sw) >> 12)) >> 12);
+        cut = clamp(44 * 256 + (sweep >> 11) * 5 + dr * 64 + m1 * 40 + flt / 2 + timbre * 40, 0, 127 * 256);
         tsvf_coef_k(&f, cut, k);
         for (i = 0; i < n; i++) {
-            int32_t sq = (int32_t)(ph0 >> 31) ? -24000 : 24000, s, lp, bp, hp;
-            s = (osc_tri(ph0) + sq) >> 1;
+            int32_t sq = (int32_t)(ph0 >> 31) ? -24000 : 24000, sub = (int32_t)(ph1 >> 31) ? -14000 : 14000, s, lp, bp, hp;
+            s = (osc_tri(ph0) + sq + sub) >> 1;
             pulsar_svf(&f, k, s, &ic1, &ic2, &lp, &bp, &hp);
             s = pulsar_grit(lp, dr);
             ph0 += inc0;
+            ph1 += inc0 >> 1;
             out[i] += voice_amp(s, m, i) << 1;
         }
         sweep -= mulq16(sweep, 5000);
-        break;
-    }
     }
     v->s[1] = sweep;
     v->s[4] = ic1;
@@ -268,34 +320,44 @@ static void pulsar_post(track_t *t, int32_t *out, uint32_t n, uint32_t nr)
     pulsar_dc[part][1] = yo;
 }
 
+/* the ENV page's four, renamed for PULSAR (params.c track_desc): the channels' decays (hits do not use the ADSR) */
+static const param_desc_t PULSAR_DEC[4] = {
+    {"K.DEC", F_TIME, 0, 127, 94, 0, 0},
+    {"S.DEC", F_TIME, 0, 127, 74, 0, 0},
+    {"M.DEC", F_TIME, 0, 127, 66, 0, 0},
+    {"B.DEC", F_TIME, 0, 127, 84, 0, 0},
+};
+
 static const preset_t PULSAR_PRESETS[] = {
-    /* name, {KICK, K.DEC, SNAP, S.DEC, METAL, SHAOS, DRIVE, SUST}, {A D S R}, fenv, mono */
-    {"PULSAR", {48, 94, 70, 74, 66, 0, 60, 0}, {0, 127, 127, 127}, 0, 0},
-    {"PULVERISE", {40, 98, 90, 80, 72, 30, 118, 0}, {0, 127, 127, 127}, 0, 0},
-    {"DEEP SUB", {20, 108, 50, 70, 60, 0, 46, 0}, {0, 127, 127, 127}, 0, 0},
-    {"TIGHT", {64, 80, 60, 62, 46, 0, 40, 0}, {0, 127, 127, 127}, 0, 0},
-    {"DRONE", {30, 100, 80, 82, 84, 50, 80, 90}, {0, 127, 127, 127}, 0, 0},
-    {"NOISE BED", {50, 92, 120, 92, 104, 80, 96, 60}, {0, 127, 127, 127}, 0, 0},
-    {"ORGANISM", {44, 96, 76, 78, 70, 64, 84, 0}, {0, 127, 127, 127}, 0, 0},
-    {"SHAOS", {40, 100, 96, 84, 86, 116, 100, 0}, {0, 127, 127, 127}, 0, 0},
+    /* name, {KICK, DROP, SNARE, SNAP, TONE, SHAOS, DRIVE, SUST}, {K.DEC S.DEC M.DEC B.DEC}, fenv, mono */
+    {"PULSAR", {48, 70, 50, 70, 20, 0, 60, 0}, {94, 74, 66, 84}, 0, 0},
+    {"PULVERISE", {40, 90, 40, 90, 60, 30, 118, 0}, {98, 80, 72, 88}, 0, 0},
+    {"DEEP SUB", {20, 40, 30, 50, 10, 0, 46, 0}, {108, 70, 60, 100}, 0, 0},
+    {"TIGHT", {64, 60, 70, 60, 30, 0, 40, 0}, {80, 62, 46, 70}, 0, 0},
+    {"DRONE", {30, 50, 44, 80, 70, 50, 80, 90}, {100, 82, 84, 96}, 0, 0},
+    {"NOISE BED", {50, 80, 60, 120, 110, 80, 96, 60}, {92, 92, 104, 84}, 0, 0},
+    {"ORGANISM", {44, 76, 56, 76, 50, 64, 84, 0}, {96, 78, 70, 90}, 0, 0},
+    {"SHAOS", {40, 100, 64, 96, 90, 116, 100, 0}, {100, 84, 86, 96}, 0, 0},
+    {"INDUSTRY", {36, 110, 80, 84, 100, 40, 122, 0}, {90, 76, 74, 80}, 0, 0},
+    {"WOOD", {58, 30, 96, 20, 20, 10, 30, 0}, {70, 52, 50, 60}, 0, 0},
 };
 
 static const engine_t ENG_PULSAR = {
     .name = "PULSAR",
-    .page_title = {"KICK SNARE", "METAL CHAOS"},
+    .page_title = {"KICK SNARE", "TONE CHAOS"},
     .edit = {
         {"KICK", F_PCT, 0, 127, 48, 0, 0},
-        {"K.DEC", F_TIME, 0, 127, 94, 0, 0},
+        {"DROP", F_PCT, 0, 127, 70, 0, 0},
+        {"SNARE", F_PCT, 0, 127, 50, 0, 0},
         {"SNAP", F_PCT, 0, 127, 70, 0, 0},
-        {"S.DEC", F_TIME, 0, 127, 74, 0, 0},
-        {"METAL", F_TIME, 0, 127, 66, 0, 0},
+        {"TONE", F_PCT, 0, 127, 20, 0, 0},
         {"SHAOS", F_PCT, 0, 127, 0, 0, 0},
         {"DRIVE", F_PCT, 0, 127, 60, 0, 0},
         {"SUST", F_PCT, 0, 127, 0, 0, 0},
     },
     .presets = PULSAR_PRESETS,
     .npresets = NELEM(PULSAR_PRESETS),
-    .knob = {P_E6, P_E2, P_E5, P_E7},    /* DRIVE, SNAP, SHAOS, SUST */
+    .knob = {P_E6, P_E2, P_E3, P_E5},     /* DRIVE, SNARE, SNAP, SHAOS */
     .poly = 8,
     .oneshot = 1,
     .note_on = pulsar_note_on,

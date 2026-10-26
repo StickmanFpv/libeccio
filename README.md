@@ -18,12 +18,12 @@ test suite; CPU load on the FM-1 is not measured yet. Keep a backup and the offi
 | **MOOG** | Minimoog-style: three oscillators (15 curated setups on one OSC knob), the transistor-ladder filter with its own contour, mixer drive | DSP from [FMini-1](https://github.com/ruppert/fmini-1) |
 | **SEM** | Oberheim SEM-style: two oscillators into a state-variable filter whose STATE morphs LP → notch → HP | [Caravel](https://github.com/bonszaimusic/caravel) |
 | **HADES** | Dark basses and subs: saw / pulse with two divider sub-octaves, a three-pole filter, BODY and DRIVE | Caravel |
-| **PULSAR** | Big driven drums after SOMA's Pulsar-23: kick, snare, metal and a pitched bass on the GM drum map; per-voice grit (drive, fold, asymmetry), a glued bus, SUST for drones, SHAOS for per-hit chaos | new (original DSP) |
+| **PULSAR** | Big driven drums after SOMA's Pulsar-23, on the GM drum map: a kick with a tune envelope (DROP), a tunable snare of three membrane partials (plus rimshot, clap and a second snare), metal from 808 squares through ring-modulation to lo-fi digital noise (TONE), a pitched bass for toms, bass lines and resonant leads; per-voice grit (drive, fold, asymmetry), a glued bus, SUST for drones, SHAOS for per-hit chaos; the four decays on the ENV page; the LFO and the mod matrix bend it | new (original DSP) |
 
 They come first in the sound browser; Melodee's PROPHET, FM6, CZ-1, SID and DRUM follow.
 
 **Knobs.** On the main page MOOG, SEM and HADES put cutoff, resonance, envelope amount and release on the four knobs
-(PULSAR: DRIVE, SNAP, SHAOS, SUST). The filter knobs turn like a Minimoog's dial: a slow turn is one step a detent, a
+(PULSAR: DRIVE, SNARE tune, SNAP, SHAOS). The filter knobs turn like a Minimoog's dial: a slow turn is one step a detent, a
 quick turn speeds up from its second detent (up to x12), so one quick turn sweeps the whole range, and the engines
 glide between the steps.
 
