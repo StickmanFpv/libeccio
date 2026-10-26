@@ -16,5 +16,9 @@ jobs:
       id-token: write
       attestations: write
     with:
-      build: if [[ "$GITHUB_REF" == refs/tags/v* ]]; then ./build.sh --release "${GITHUB_REF_NAME#v}"; else ./build.sh; fi
+      # (the log's tail also becomes the run's error annotation, readable without the full log)
+      build: >-
+        if [[ "$GITHUB_REF" == refs/tags/v* ]]; then set -- --release "${GITHUB_REF_NAME#v}"; else set --; fi;
+        ./build.sh "$@" > build.log 2>&1; rc=$?; tail -n 40 build.log;
+        if [ $rc -ne 0 ]; then echo "::error title=build failed::$(tail -n 60 build.log | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')"; exit $rc; fi
       packages: build/*.fwsc
