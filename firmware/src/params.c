@@ -94,7 +94,7 @@ static const char *const N_MSRC[] = {"OFF", "LFO", "ENV", "VEL", "KEY", "RAND", 
 static const char *const N_MDST[] = {"OFF", "PITCH", "CUT", "SHP", "AMP", "PAN", "", "", "", "", "RATE",
                                      "VIB", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "DEPTH"};
 static const char *const N_ENGNAME[] = {"-", "-", MELODEE_LEGACY_EXTRAS ? "PHASE" : "-", "SID", "-", MELODEE_LEGACY_EXTRAS ? "VOICE" : "-", MELODEE_LEGACY_EXTRAS ? "TRIO" : "-", MELODEE_LEGACY_EXTRAS ? "WHEEL" : "-", "-", MELODEE_LEGACY_EXTRAS ? "PHYS" : "-",
-                                             "DRUM", MELODEE_LEGACY_EXTRAS ? "NOISE" : "-", "FM6", MELODEE_SLICE ? "SLICE" : "-", "-", "CZ-1", "-", "-", "-", "PROPHET", "-", "MIDI Track"};
+                                             "DRUM", MELODEE_LEGACY_EXTRAS ? "NOISE" : "-", "FM6", MELODEE_SLICE ? "SLICE" : "-", "-", "CZ-1", "-", "-", "-", "PROPHET", "-", "MIDI Track", "SEM", "HADES", "MOOG", "PULSAR", "VOICE"};
 
 #define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
 #define PE(l, n, df) {l, F_ENUM, 0, (int16_t)(sizeof(n) / sizeof(n[0]) - 1), df, n, 0}
@@ -383,6 +383,8 @@ static const param_desc_t *track_desc(const track_t *t, uint32_t id)
         return &PULSAR_DEC[id - P_ATK];
     if (t->eng_req == ENGI_PULSAR && id == P_ED_SHP)
         return &PULSAR_SIZE_D;
+    if (t->eng_req == ENGI_MOOG && id >= P_FM1_ATK && id <= P_FM1_REL)   /* fork: MOOG's CONTOUR page */
+        return &MOOG_CONTOUR_D[id - P_FM1_ATK];
     if (id >= P_E0 && id <= P_E7) {                   /* the engine asked for (t->engine follows after a fade) */
         const engine_t *e = ENGINES[eng_idx(t->eng_req)];
         const param_desc_t *d = e->desc ? e->desc(t, id - P_E0) : 0;   /* a mode-dependent label / names */
@@ -397,6 +399,8 @@ static const param_desc_t *param_desc_of(uint32_t e, uint32_t id)
 {
     if (e == 2u && id >= P_FM1_ATK && id <= P_FM4_LEVEL)
         return &CZ_ED[id - P_FM1_ATK];
+    if (e == ENGI_MOOG && id >= P_FM1_ATK && id <= P_FM1_REL)   /* fork: MOOG's contour and KBD */
+        return &MOOG_CONTOUR_D[id - P_FM1_ATK];
     return id >= P_E0 ? &ENGINES[e]->edit[id - P_E0] : &TP[id];
 }
 
@@ -630,6 +634,7 @@ static const page_t PAGES[] = {
                                                                           * (QNT MPC only), not a page of its own */
     {"EDIT 1", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E0, P_E1, P_E2, P_E3}},
     {"EDIT 2", FAM_EDIT, SC_ENGINE, GR_NONE, {P_E4, P_E5, P_E6, P_E7}},
+    {"CONTOUR", FAM_EDIT, SC_TRACK, GR_NONE, {P_FM1_ATK, P_FM1_DEC, P_FM1_SUS, P_FM1_REL}},   /* fork: MOOG only (ui.c) */
     {"DRUM SOUND",FAM_EDIT,SC_DRUM,GR_NONE,{0,1,2,3}},
     {"DRUM MIX",FAM_EDIT,SC_DRUM,GR_NONE,{0,4,255,255}},
     /* FM6 only (page_visible): the patch as the DX7 has it, its operators (PRESETS picks one), the functions */

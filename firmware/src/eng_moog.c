@@ -4,44 +4,67 @@
  * GPL-3.0-only, partly based on Felucca); see eng_moog_filter.h for the ladder's laws.
  * Port notes, for this fork:
  *   - FMini-1 keeps a 32-byte patch per track (ranges, waves, mixer, switches) beside the EDIT values. Here the
- *     oscillator section is one curated choice, OSC (E7: MOOG_OSC below), so every sound lives in the eight EDIT
- *     values and saves with projects and presets like any engine's.
+ *     oscillator section is four knobs (EDIT 2, "OSC"): WAVE (the three oscillators' waves and mixer levels, a
+ *     curated choice: MOOG_WAVE), OSCS (how many sound, 1..3), DTUNE (OSC 2 up and OSC 3 down, 0 .. about 30 cents)
+ *     and OCTS (the three oscillators' octaves and intervals: MOOG_OCTS). EDIT 1 is the filter: CUT, EMPH, CNTR
+ *     (the contour's amount) and DRIVE.
+ *   - The filter contour (F.ATK, F.DEC, F.SUS) and the keyboard tracking (KBD) live in the track's spare operator
+ *     envelope (P_FM1_ATK .. P_FM1_REL, which only FM engines read), shown on its own CONTOUR page (params.c); a
+ *     factory sound sets them with its EDIT values (moog_preset_loaded).
  *   - Melodee's voice holds six state words (FMini-1 used eight): the ladder s[0..3], the feedback's lag pole s[4],
  *     the filter contour s[5] (stage << 24 | level Q23). The VCOs' slow drift, stored per voice in FMini-1, is a fixed
  *     calibration per voice slot plus a slow wobble from the part's block counter: no state.
  *   - The modulation section (LFO / noise to pitch and filter, the MOD depth) is left to the host's LFO and matrix;
  *     its EDIT slot is DRIVE, the mixer's overload (the "Minimoog trick" of the mixer feeding the filter hot).
  * The loudness contour is the host's ADSR; the filter contour is the engine's own (CNTR amount, F.ATK, F.DEC, F.SUS;
- * as on the original, the release takes the DECAY time). Keyboard tracking is fixed at 2/3.
+ * as on the original, the release takes the DECAY time). Keyboard tracking: KBD (0..1, 2/3 by default).
  * POLY plays up to 6 voices; MONO / LEGATO / UNISON as the host gives them. */
 #include "eng_moog_filter.h"
 #define MOOG_POLY 6u
-#define MOOG_KBD 85                 /* keyboard tracking of the cutoff, 0..127 = 0..1 */
+#define MOOG_KBD 85                 /* keyboard tracking of the cutoff by default, 0..127 = 0..1 */
+#define MOOG_C_ATK P_FM1_ATK        /* the filter contour and KBD: the spare operator envelope (see above) */
+#define MOOG_C_DEC P_FM1_DEC
+#define MOOG_C_SUS P_FM1_SUS
+#define MOOG_C_KBD P_FM1_REL
 
-/* the oscillator section, one of a few curated setups: ranges (0 LO, 1 32', 2 16', 3 8', 4 4', 5 2'), waves
- * (0 TRI, 1 SHARK, 2 SAW, 3 SQR, 4 PLS W, 5 PLS N), OSC 2 / 3 offsets in cents, mixer levels (0..127, squared),
- * the noise's level */
-typedef struct { const char *name; uint8_t r[3], w[3]; int16_t c2, c3; uint8_t l[3], ln; } moog_osc_t;
-static const moog_osc_t MOOG_OSC[] = {
-    {"CLASSIC", {2, 2, 3}, {2, 2, 2}, 7, -5, {110, 104, 80}, 0},       /* three saws, a touch apart */
-    {"FAT", {2, 2, 1}, {2, 3, 2}, 9, 3, {112, 100, 78}, 0},            /* saw, square, saw an octave down */
-    {"SUB", {2, 1, 2}, {3, 0, 2}, 0, 4, {112, 104, 0}, 0},             /* square over a triangle sub */
-    {"LEAD", {3, 3, 4}, {2, 2, 3}, 8, -4, {108, 100, 64}, 0},
-    {"FIFTH", {3, 3, 2}, {2, 2, 2}, 702, 0, {104, 92, 84}, 0},         /* OSC 2 a fifth up */
-    {"BRASS", {3, 3, 3}, {2, 2, 4}, 6, -9, {108, 104, 88}, 0},
-    {"HOLLOW", {3, 3, 2}, {3, 5, 0}, 5, 0, {104, 88, 72}, 0},
-    {"FLUTE", {3, 4, 3}, {0, 0, 0}, 3, 0, {116, 64, 0}, 30},           /* triangles and a breath of noise */
-    {"SHARK", {2, 2, 3}, {1, 1, 1}, 10, -6, {112, 108, 72}, 0},
-    {"WIDE", {2, 2, 1}, {4, 5, 2}, 11, -8, {108, 104, 76}, 0},
-    {"OCTAVES", {1, 2, 3}, {2, 2, 2}, 4, -4, {104, 100, 92}, 0},
-    {"SAW", {2, 2, 2}, {2, 2, 2}, 0, 0, {116, 0, 0}, 0},               /* one oscillator */
-    {"SQR", {2, 2, 2}, {3, 3, 3}, 0, 0, {116, 0, 0}, 0},
-    {"THIN", {3, 3, 3}, {5, 5, 5}, 6, 0, {112, 90, 0}, 0},
-    {"NOISE", {3, 3, 3}, {0, 0, 0}, 0, 0, {40, 0, 0}, 120},
+/* WAVE: the three oscillators' waves (0 TRI, 1 SHARK, 2 SAW, 3 SQR, 4 PLS W, 5 PLS N), mixer levels (0..127, squared)
+ * and the noise's level */
+typedef struct { uint8_t w[3], l[3], ln; } moog_wave_t;
+static const moog_wave_t MOOG_WAVE[] = {
+    {{2, 2, 2}, {110, 104, 96}, 0},     /* SAW */
+    {{3, 3, 3}, {108, 100, 92}, 0},     /* SQR */
+    {{2, 3, 2}, {110, 100, 90}, 0},     /* SAW+SQR */
+    {{3, 0, 2}, {112, 104, 80}, 0},     /* SQR+TRI: a square over a triangle */
+    {{0, 0, 0}, {116, 100, 90}, 18},    /* TRI, a breath of noise: the flute */
+    {{1, 1, 1}, {112, 106, 96}, 0},     /* SHARK */
+    {{4, 5, 4}, {106, 100, 90}, 0},     /* PULSE */
+    {{3, 5, 0}, {104, 90, 80}, 0},      /* HOLLOW */
+    {{2, 2, 0}, {110, 100, 100}, 0},    /* SAW+TRI */
+    {{3, 3, 3}, {40, 0, 0}, 120},       /* NOISE */
 };
-#define MOOG_NOSC NELEM(MOOG_OSC)
-static const char *const N_MOOG_OSC[MOOG_NOSC] = {"CLASSIC", "FAT", "SUB", "LEAD", "FIFTH", "BRASS", "HOLLOW", "FLUTE",
-                                                  "SHARK", "WIDE", "OCTAVES", "SAW", "SQR", "THIN", "NOISE"};
+#define MOOG_NWAVE NELEM(MOOG_WAVE)
+static const char *const N_MOOG_WAVE[MOOG_NWAVE] = {"SAW", "SQR", "SAW+SQR", "SQR+TRI", "TRI", "SHARK", "PULSE",
+                                                    "HOLLOW", "SAW+TRI", "NOISE"};
+/* OCTS: each oscillator's offset from the note in semitones (the Minimoog's range switches, and OSC 2 / 3 tuned to an
+ * interval); with fewer OSCS the first ones sound */
+static const int8_t MOOG_OCTS[][3] = {
+    {0, 0, 0},       /* UNISON */
+    {0, 0, 12},      /* OCT UP: OSC 3 an octave up */
+    {0, 0, -12},     /* SUB: OSC 3 an octave down */
+    {0, 12, -12},    /* OCTAVES */
+    {-12, -12, 0},   /* BASS: 16' 16' 8' (the classic bass) */
+    {-24, -12, 0},   /* DEEP: 32' 16' 8' */
+    {0, 7, 0},       /* FIFTH */
+    {0, 7, 12},      /* 5TH+OCT */
+    {0, 7, -12},     /* 5TH SUB */
+    {0, 5, 0},       /* FOURTH */
+    {0, 3, 7},       /* MINOR: one key a minor triad */
+    {0, 4, 7},       /* MAJOR */
+};
+#define MOOG_NOCTS NELEM(MOOG_OCTS)
+static const char *const N_MOOG_OCTS[MOOG_NOCTS] = {"UNISON", "OCT UP", "SUB", "OCTAVES", "BASS", "DEEP", "FIFTH",
+                                                    "5TH+OCT", "5TH SUB", "FOURTH", "MINOR", "MAJOR"};
+static const moog_wave_t *moog_wave_of(const int16_t *p) { return &MOOG_WAVE[clamp(p[P_E4], 0, MOOG_NWAVE - 1)]; }
 
 static int32_t moog_sm[NPART][3];                 /* the smoothed CUT, EMPH, CNTR knobs (Q16): the encoder's steps become ramps */
 static uint8_t moog_sm_ok;                        /* bit p: moog_sm[p] follows the knobs (clear = snap to them) */
@@ -88,7 +111,7 @@ static void moog_block(track_t *t)
         return;
     }
     moog_sm_ok |= (uint8_t)(1u << part);
-    if (MOOG_OSC[clamp(t->p[P_E7], 0, MOOG_NOSC - 1)].ln)
+    if (moog_wave_of(t->p)->ln)
         for (i = 0; i < CTL; i++)
             moog_nbuf[part][i] = (int32_t)(noise32(&moog_nst[part]) >> 16) - 32768;
 }
@@ -108,11 +131,6 @@ static void moog_wave(uint32_t w, uint32_t *php, uint32_t inc, int32_t g, int32_
     *php = ph;
 }
 
-static int32_t moog_range16(uint32_t r)            /* range in 1/16 semitones (LO: very low) */
-{
-    static const int16_t R[6] = {-48 * 16, -24 * 16, -12 * 16, 0, 12 * 16, 24 * 16};
-    return R[r % 6u];
-}
 
 /* a voice slot's fixed calibration, -128..127 (part, lane) */
 static inline int32_t moog_calib(const track_t *t, const voice_t *v, uint32_t salt)
@@ -136,13 +154,13 @@ static void moog_note_on(track_t *t, voice_t *v)
 static int32_t moog_contour(const int16_t *p, voice_t *v)
 {
     uint32_t st = (uint32_t)v->s[5] >> 24;
-    int32_t e = v->s[5] & 0xFFFFFF, sus = (int32_t)p[P_E5] << 16, k = (int32_t)ENV_EXP[p[P_E4] & 127];
+    int32_t e = v->s[5] & 0xFFFFFF, sus = (int32_t)clamp(p[MOOG_C_SUS], 0, 127) << 16, k = (int32_t)ENV_EXP[p[MOOG_C_DEC] & 127];
     if (!v->gate && st && st != 3u)
         st = 3;
     switch (st) {
     case 1:
         {   /* the capacitor charges toward a level above full: a concave rise that ends in a corner, as in the Minimoog */
-            int32_t step = (int32_t)(ENV_LIN[p[P_E3] & 127] >> 1), d = (int32_t)(((int64_t)((5 << 21) - e) * step * 824) >> 32);
+            int32_t step = (int32_t)(ENV_LIN[p[MOOG_C_ATK] & 127] >> 1), d = (int32_t)(((int64_t)((5 << 21) - e) * step * 824) >> 32);
             e += d < 1 ? 1 : d;
         }
         if (e >= (1 << 23)) {
@@ -177,7 +195,9 @@ static void moog_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
 {
     const int16_t *p = t->p;
     uint32_t part = (uint32_t)(t - trk);
-    const moog_osc_t *o = &MOOG_OSC[clamp(p[P_E7], 0, MOOG_NOSC - 1)];
+    const moog_wave_t *o = moog_wave_of(p);
+    const int8_t *oc = MOOG_OCTS[clamp(p[P_E7], 0, MOOG_NOCTS - 1)];
+    int32_t nosc = clamp(p[P_E5], 1, 3), dt = clamp(p[P_E6], 0, 127), dc = dt * dt * 30 / 16129;   /* DTUNE: cents */
     int32_t mix[CTL];
     int32_t env15, lc, fine, k12, G16, gx16, c0, c1, c2, c3, inv14, kinv12, trim12, drive;
     int32_t l1, l2, l3, ln, dr1, dr2, dr3, sm0, sm1, sm2;
@@ -203,16 +223,17 @@ static void moog_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
         dr2 = cb / 80 + wb / 21000;
         dr3 = (dr1 - dr2) / 2;
     }
-    inc1 = cents_inc(clamp(m->pitch16 + moog_range16(o->r[0]), 0, 2047), dr1, fine);
-    inc2 = cents_inc(clamp(m->pitch16 + moog_range16(o->r[1]), 0, 2047), o->c2 + dr2, fine);
-    inc3 = cents_inc(clamp(m->pitch16 + moog_range16(o->r[2]), 0, 2047), o->c3 + dr3, fine);
+    inc1 = cents_inc(clamp(m->pitch16 + oc[0] * 16, 0, 2047), dr1, fine);
+    inc2 = cents_inc(clamp(m->pitch16 + oc[1] * 16, 0, 2047), dc + dr2, fine);
+    inc3 = cents_inc(clamp(m->pitch16 + oc[2] * 16, 0, 2047), -(dc * 3 / 4) + dr3, fine);
 
     /* mixer levels: a squared curve; DRIVE pushes the mix into the mixer's soft overload */
     l1 = (int32_t)(o->l[0] * o->l[0] * 2);
-    l2 = (int32_t)(o->l[1] * o->l[1] * 2);
-    l3 = (int32_t)(o->l[2] * o->l[2] * 2);
+    l2 = nosc >= 2 ? (int32_t)(o->l[1] * o->l[1] * 2) : 0;
+    l3 = nosc >= 3 ? (int32_t)(o->l[2] * o->l[2] * 2) : 0;
     ln = (int32_t)(o->ln * o->ln * 2);
-    drive = 4096 + p[P_E6] * 64;                                     /* Q12: x1 .. x3 */
+    drive = 4096 + p[P_E3] * 64;                                     /* Q12: x1 .. x3 */
+    drive = drive * (nosc == 1 ? 6 : nosc == 2 ? 5 : 4) / 4;         /* fewer oscillators: the mixer a little hotter */
     for (i = 0; i < n; i++)
         mix[i] = 0;
     if (l1) moog_wave(o->w[0], &ph0, inc1, l1, mix, n); else ph0 += inc1 * n;
@@ -231,7 +252,7 @@ static void moog_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
     }
     lc += (m->cutoff * 55) >> 10;                                                       /* the host's steps (1/14 octave) */
     lc += (int32_t)(((int64_t)env15 * sm2 / (127 * 65536)) * 960) >> 15;                /* the contour: up to 5 octaves */
-    lc += ((v->pitch_cur - MOOG_NOTE0 * 16) * MOOG_KBD * 516) >> 16;                    /* the keyboard */
+    lc += ((v->pitch_cur - MOOG_NOTE0 * 16) * clamp(p[MOOG_C_KBD], 0, 127) * 516) >> 16;   /* the keyboard (KBD) */
     lc = clamp(lc, MOOG_GM0 * 16, MOOG_FOSC_MAX16);
     {   /* the stage pole G and the lag pole's from the tables (a semitone an entry, linear between), the feedback solved ahead */
         uint32_t ix = (uint32_t)((lc >> 4) - MOOG_GM0), fr = (uint32_t)lc & 15u, gq, gxq, g2, g3, g4, om;
@@ -295,31 +316,55 @@ static void moog_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const 
 static uint32_t moog_units(const track_t *t) { (void)t; return 2u; }   /* a ladder voice costs about a Prophet voice */
 
 static const preset_t MOOG_PRESETS[] = {
-    /* name, {CUT, EMPH, CNTR, F.ATK, F.DEC, F.SUS, DRIVE, OSC}, {A D S R}, fenv, mono */
-    {"MINI BASS", {38, 34, 72, 0, 52, 22, 40, 0}, {0, 64, 100, 22}, 0, 1},
-    {"TAURUS SUB", {30, 18, 46, 0, 62, 30, 56, 2}, {0, 70, 110, 30}, 0, 1},
-    {"FAT LEAD", {66, 52, 48, 0, 70, 60, 72, 1}, {2, 70, 112, 40}, 0, 1},
-    {"SQUELCH", {30, 92, 84, 0, 44, 8, 50, 11}, {0, 60, 96, 20}, 0, 1},
-    {"MOOG BRASS", {46, 22, 76, 34, 72, 66, 30, 5}, {22, 80, 100, 48}, 0, 0},
-    {"POLY PAD", {54, 26, 40, 84, 92, 82, 18, 9}, {72, 90, 110, 92}, 0, 0},
-    {"FLUTE", {70, 12, 22, 22, 60, 92, 8, 7}, {16, 70, 110, 40}, 0, 1},
-    {"PLUCK", {44, 40, 92, 0, 40, 0, 30, 0}, {0, 60, 0, 40}, 0, 0},
-    {"FIFTH LEAD", {62, 40, 50, 0, 66, 54, 60, 4}, {2, 70, 108, 40}, 0, 1},
-    {"OCTAVE BAS", {34, 30, 62, 0, 56, 18, 64, 10}, {0, 66, 104, 24}, 0, 1},
+    /* name, {CUT, EMPH, CNTR, DRIVE, WAVE, OSCS, DTUNE, OCTS}, {A D S R}, fenv, mono; the contour: MOOG_CONTOUR */
+    {"MINI BASS", {38, 34, 72, 40, 0, 3, 60, 4}, {0, 64, 100, 22}, 0, 1},
+    {"TAURUS SUB", {30, 18, 46, 56, 3, 2, 24, 5}, {0, 70, 110, 30}, 0, 1},
+    {"FAT LEAD", {66, 52, 48, 72, 2, 3, 70, 2}, {2, 70, 112, 40}, 0, 1},
+    {"SQUELCH", {30, 92, 84, 50, 0, 1, 0, 4}, {0, 60, 96, 20}, 0, 1},
+    {"MOOG BRASS", {46, 22, 76, 30, 0, 3, 56, 0}, {22, 80, 100, 48}, 0, 0},
+    {"POLY PAD", {54, 26, 40, 18, 0, 3, 84, 1}, {72, 90, 110, 92}, 0, 0},
+    {"FLUTE", {70, 12, 22, 8, 4, 2, 24, 1}, {16, 70, 110, 40}, 0, 1},
+    {"PLUCK", {44, 40, 92, 30, 2, 2, 34, 1}, {0, 60, 0, 40}, 0, 0},
+    {"FIFTH LEAD", {62, 40, 50, 60, 0, 3, 44, 8}, {2, 70, 108, 40}, 0, 1},
+    {"OCTAVE BAS", {34, 30, 62, 64, 0, 3, 40, 5}, {0, 66, 104, 24}, 0, 1},
+    {"SUPERSAW", {72, 20, 30, 36, 0, 3, 110, 0}, {6, 80, 110, 60}, 0, 0},
+    {"ONE FINGER", {58, 36, 56, 44, 0, 3, 30, 10}, {2, 70, 104, 40}, 0, 1},
 };
+#define MOOG_NPRESETS NELEM(MOOG_PRESETS)
+/* each factory sound's filter contour: F.ATK, F.DEC, F.SUS, KBD (the CONTOUR page) */
+static const uint8_t MOOG_CONTOUR[MOOG_NPRESETS][4] = {
+    {0, 52, 22, 85}, {0, 62, 30, 85}, {0, 70, 60, 85}, {0, 44, 8, 100}, {34, 72, 66, 85}, {84, 92, 82, 64},
+    {22, 60, 92, 85}, {0, 40, 0, 85}, {0, 66, 54, 85}, {0, 56, 18, 85}, {30, 80, 70, 64}, {0, 62, 40, 85}};
+/* the CONTOUR page's four (params.c track_desc: P_FM1_ATK .. P_FM1_REL on a MOOG track) */
+static const param_desc_t MOOG_CONTOUR_D[4] = {
+    {"F.ATK", F_TIME, 0, 127, 0, 0, 0},
+    {"F.DEC", F_TIME, 0, 127, 64, 0, 0},
+    {"F.SUS", F_PCT, 0, 127, 40, 0, 0},
+    {"KBD", F_PCT, 0, 127, MOOG_KBD, 0, 0},
+};
+
+/* a factory sound loaded (ui.c apply_preset_to): its contour, which lives outside the EDIT values */
+static void moog_preset_loaded(track_t *t, uint32_t pi)
+{
+    uint32_t i;
+    if (t->eng_req != ENGI_MOOG)
+        return;
+    for (i = 0; i < 4u; i++)
+        t->p[MOOG_C_ATK + i] = pi < MOOG_NPRESETS ? MOOG_CONTOUR[pi][i] : MOOG_CONTOUR_D[i].def;
+}
 
 static const engine_t ENG_MOOG = {
     .name = "MOOG",
-    .page_title = {"FILTER", "CONTOUR/OSC"},
+    .page_title = {"FILTER", "OSC"},
     .edit = {
         {"CUT", F_CUTOFF, 0, 127, 64, 0, 0},
         {"EMPH", F_PCT, 0, 127, 40, 0, 0},
         {"CNTR", F_PCT, 0, 127, 64, 0, 0},
-        {"F.ATK", F_TIME, 0, 127, 0, 0, 0},
-        {"F.DEC", F_TIME, 0, 127, 64, 0, 0},
-        {"F.SUS", F_PCT, 0, 127, 40, 0, 0},
         {"DRIVE", F_PCT, 0, 127, 30, 0, 0},
-        {"OSC", F_ENUM, 0, MOOG_NOSC - 1, 0, N_MOOG_OSC, 0},
+        {"WAVE", F_ENUM, 0, MOOG_NWAVE - 1, 0, N_MOOG_WAVE, 0},
+        {"OSCS", F_INT, 1, 3, 3, 0, 0},
+        {"DTUNE", F_PCT, 0, 127, 40, 0, 0},
+        {"OCTS", F_ENUM, 0, MOOG_NOCTS - 1, 0, N_MOOG_OCTS, 0},
     },
     .presets = MOOG_PRESETS,
     .npresets = NELEM(MOOG_PRESETS),

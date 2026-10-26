@@ -5249,7 +5249,7 @@ static int test_prophet_pages(void)
     ui_power_on();set_engine_of(TSEL,ENGI_PROPHET);int bad=0,visible=0;
     bad+=check("selecting Prophet starts on its first factory program",!TSEL->user&&TSEL->preset==1u&&!memcmp(p5_patch_of(TSEL),p5_fac(0),sizeof(p5_patch_t)));
     /* fork: its own engines' presets lead, then the Prophet's 201 */
-    uint32_t fork=ENGINES[ENGI_MOOG]->npresets+ENGINES[ENGI_SEM]->npresets+ENGINES[ENGI_HADES]->npresets+ENGINES[ENGI_PULSAR]->npresets;
+    uint32_t fork=ENGINES[ENGI_MOOG]->npresets+ENGINES[ENGI_SEM]->npresets+ENGINES[ENGI_HADES]->npresets+ENGINES[ENGI_VOICE]->npresets+ENGINES[ENGI_PULSAR]->npresets;
     uint32_t count,slot,source=preset_all_at(fork+200u,&slot);
     bad+=check("all 201 Prophet factory entries follow the fork's engines in the browser",preset_all_pos(&count)==fork+1u&&ENGINES[ENGI_PROPHET]->npresets==201u&&source==ENGI_PROPHET&&slot==200u);
     int factory=ENGINES[ENGI_PROPHET]->npresets==P5_FACTORY_N+1u;

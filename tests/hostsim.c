@@ -143,6 +143,8 @@ static void host_preset_values(track_t *t, uint32_t e, uint32_t pi, const preset
     cz_factory_loaded(t);
     if(e==ENGI_PROPHET){uint32_t k=(uint32_t)(t-trk)%NPART;p5_ready[k]=1;p5_preset_loaded(t,pi);}   /* (its program, as ui.c) */
     fm6_track_loaded(t);                          /* FM6: the preset's patch (ui.c apply_preset_to) */
+    moog_preset_loaded(t, pi);                    /* fork: MOOG's contour (ui.c apply_preset_to) */
+    voice_preset_loaded(t, pi);                   /* fork: VOICE's movement */
 }
 static void host_preset_req(track_t *t, uint32_t e, uint32_t pi)
 {
@@ -880,6 +882,8 @@ int main(int argc, char **argv)
         for (i = 0; i < 8; i++) inst.p[P_E0 + i] = p->e[i];
         inst.p[P_ATK] = p->env[0]; inst.p[P_DEC] = p->env[1];
         inst.p[P_SUS] = p->env[2]; inst.p[P_REL] = p->env[3]; inst.p[P_ED_FLT] = p->fenv;
+        moog_preset_loaded(&inst, preset % ENGINES[eng]->npresets);   /* fork: MOOG's contour */
+        voice_preset_loaded(&inst, preset % ENGINES[eng]->npresets);
     }
     fm6_track_loaded(&inst);                            /* FM6: the preset's patch */
     inst.p[P_VOICE] = (int16_t)mono;

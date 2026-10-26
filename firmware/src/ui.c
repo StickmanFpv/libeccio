@@ -305,6 +305,8 @@ static int page_visible(uint32_t i)
     if (PAGES[i].graph == GR_SLICES)
         return 0;
 #endif
+    if (PAGES[i].fam == FAM_EDIT && PAGES[i].scope == SC_TRACK && str_eq(PAGES[i].title, "CONTOUR"))
+        return TSEL->eng_req == ENGI_MOOG;              /* fork: MOOG's filter contour (eng_moog.c) */
     return !(PAGES[i].fam == FAM_EDIT && PAGES[i].id[0] >= P_FM1_ATK &&
              PAGES[i].id[0] <= P_FM4_LEVEL);
 }
@@ -1025,6 +1027,8 @@ static void apply_preset_to(track_t *t, uint32_t pi)
     cz_track_accept(t);
     fm6_track_loaded(t);                              /* FM6: the preset's patch */
     pulsar_preset_loaded(t, pi);                      /* fork: PULSAR's SIZE */
+    moog_preset_loaded(t, pi);                        /* fork: MOOG's contour */
+    voice_preset_loaded(t, pi);                       /* fork: VOICE's movement */
     load_end(t);
 }
 

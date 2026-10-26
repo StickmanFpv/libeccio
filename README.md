@@ -15,19 +15,21 @@ test suite; CPU load on the FM-1 is not measured yet. Keep a backup and the offi
 
 | Engine | Sound | From |
 |---|---|---|
-| **MOOG** | Minimoog-style: three oscillators (15 curated setups on one OSC knob), the transistor-ladder filter with its own contour, mixer drive | DSP from [FMini-1](https://github.com/ruppert/fmini-1) |
+| **MOOG** | Minimoog-style: the transistor-ladder filter and its contour (FILTER: CUT EMPH CNTR DRIVE; CONTOUR: F.ATK F.DEC F.SUS KBD), and the oscillators on four knobs (OSC: WAVE, OSCS 1..3, DTUNE, OCTS: unison, sub, octaves, fifths, bass 16'/8', one-finger chords) | DSP from [FMini-1](https://github.com/ruppert/fmini-1) |
 | **SEM** | Oberheim SEM-style: two oscillators into a state-variable filter whose STATE morphs LP → notch → HP | [Caravel](https://github.com/bonszaimusic/caravel) |
 | **HADES** | Dark basses and subs: saw / pulse with two divider sub-octaves, a three-pole filter, BODY and DRIVE | Caravel |
-| **PULSAR** | Big driven drums after SOMA's Pulsar-23, on the GM drum map: a kick with a tune envelope (DROP), a tunable snare of three membrane partials (plus rimshot, clap and a second snare), metal from 808 squares through ring-modulation to lo-fi digital noise (TONE), a pitched bass for toms, bass lines and resonant leads; per-voice grit (drive, fold, asymmetry), a glued bus, SUST for drones, SHAOS for per-hit chaos; the four decays on the ENV page; the LFO and the mod matrix bend it | new (original DSP) |
+| **VOICE** | Sung vowels, GR!MM's VOICE: VOWEL, SHIFT, BUZZ, BREATH on the main knobs, the vowel's glide (VOWL2, TALK), Q and RAND; GR!MM's choirs, monks and whispers with their slow movement | [GR!MM](https://github.com/GRiMMBIENT/grimm) (Felucca's formant oscillator) |
+| **PULSAR** | Big driven drums after SOMA's Pulsar-23, a full kit on the keys (GM map, the first C is the kick): kick and deep kick, snare, second snare, rimshot, clap, closed / pedal / open hats, cymbals, six toms (and congas), cowbell and bells; DROP, a tunable snare, TONE (808 squares to ring-mod to lo-fi digital noise), per-voice grit, a glued bus, SUST for drones, SHAOS for per-hit chaos, SIZE from muffled to thunder; the four decays on the ENV page (kick, snare, metal, toms) | new (original DSP) |
 
-They come first in the sound browser; Melodee's PROPHET, FM6, CZ-1, SID and DRUM follow.
+They come first in the sound browser; Melodee's PROPHET, FM6, CZ-1, SID and DRUM follow. The four tracks start as MOOG,
+SEM, HADES and PULSAR.
 
 **Home screen.** The sound you are editing on top (its voice mode, the keys' octave, EDIT or its MIDI channel), the
 four knobs always shown as rings of dots, and under them the MIDI channels in use, each lit as the KO II plays it.
 Melodee's track rows give way to it (the sequencer pages are all still there).
 
 **Knobs.** On the main page MOOG, SEM and HADES put cutoff, resonance, envelope amount and release on the four knobs
-(PULSAR: DRIVE, SNAP, SHAOS and SIZE: muffled to thunder). The filter knobs turn like a Minimoog's dial: a slow turn is one step a detent, a
+(VOICE: VOWEL, SHIFT, BUZZ, BREATH; PULSAR: DRIVE, SNAP, SHAOS and SIZE: muffled to thunder). The filter knobs turn like a Minimoog's dial: a slow turn is one step a detent, a
 quick turn speeds up from its second detent (up to x12), so one quick turn sweeps the whole range, and the engines
 glide between the steps.
 
@@ -57,5 +59,5 @@ Locally: [BUILDING.md](BUILDING.md) (the JieLi toolchain and SDK). The host test
 
 GPL-3.0-only, as Melodee and Felucca. Bundled fonts and ported DSP keep their own licences ([LICENSES/](LICENSES),
 [LICENSING.md](LICENSING.md)). Credits: Melodee (Kerem Kilic), Felucca (Leo Kuroshita, Hügelton Instruments),
-Caravel (bonszaimusic: SEM, HADES), FMini-1 (Guilherme Ruppert: the ladder filter and contour), and everyone credited
+Caravel (bonszaimusic: SEM, HADES), FMini-1 (Guilherme Ruppert: the ladder filter and contour), GR!MM (VOICE), and everyone credited
 in [docs/MELODEE_README.md](docs/MELODEE_README.md).
