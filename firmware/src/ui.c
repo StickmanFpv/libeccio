@@ -1024,6 +1024,7 @@ static void apply_preset_to(track_t *t, uint32_t pi)
     cz_factory_loaded(t);
     cz_track_accept(t);
     fm6_track_loaded(t);                              /* FM6: the preset's patch */
+    pulsar_preset_loaded(t, pi);                      /* fork: PULSAR's SIZE */
     load_end(t);
 }
 

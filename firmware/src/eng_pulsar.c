@@ -121,6 +121,10 @@ static uint32_t pulsar_decay(const int16_t *p, const voice_t *v)
     return (uint32_t)clamp(d + sh, 0, 115);
 }
 
+/* the boom tail's state (post, below): declared here, as a voice keeps the part rendering while the tail rings */
+#define PB_N 4u
+static struct { uint16_t w[PB_N]; int32_t damp[PB_N], acc, out0, out1, nz, lvl; uint8_t owner, k, on; } pb;
+
 /* the voice's amplitude, once a control tick: its own decay (or SUST's hold while the key is down); the voice ends
  * when it has died away. The host scales it by the velocity. */
 static int32_t pulsar_amp(track_t *t, voice_t *v, int32_t adsr)
@@ -135,6 +139,18 @@ static int32_t pulsar_amp(track_t *t, voice_t *v, int32_t adsr)
     else
         e -= mulq16(e, ENV_EXP[pulsar_decay(p, v)]);
     if (e < (1 << 15)) {                                   /* -54 dB: done */
+        /* the part's boom tail still ringing: one voice stays, silent (a ghost: render skips it), so the part keeps
+         * rendering and its bus (post) is heard until the tail dies away */
+        uint32_t part = (uint32_t)(t - trk), k;
+        if (pb.owner == part + 1u && pb.lvl > 40) {
+            for (k = 0; k < NVOICE && !(t->v[k].active && &t->v[k] != v && !t->v[k].s[0]); k++)
+                ;
+            if (k == NVOICE || !v->s[0]) {               /* no other ghost (or this is it) */
+                v->s[0] = 0;
+                v->env = 1 << 24;
+                return 0;
+            }
+        }
         v->active = v->gate = 0;
         v->stage = 0;
         v->env = 0;
@@ -173,16 +189,21 @@ static void pulsar_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     int32_t sweep = v->s[1], ic1 = v->s[4], ic2 = v->s[5], m1 = shaos_m(v, 1), m2 = shaos_m(v, 2);
     int32_t dr = clamp(p[P_E6] + m2 / 3, 0, 127), punch = p[P_E1], timbre = p[P_E4];
     int32_t bend = clamp(m->pitch16 - v->pitch16, -24 * 16, 24 * 16);   /* the host's PIT: LFO, ENV, the matrix */
-    int32_t flt = m->cutoff, shp = m->shape - 64 * 256;                  /* FLT (0..127 << 8), SHP around its middle */
+    int32_t flt = m->cutoff, size = p[P_ED_SHP];                         /* FLT (0..127 << 8); SIZE (post) -64..63 */
     uint32_t ph0 = v->ph[0], ph1 = v->ph[1], ph2 = v->ph[2], bq = pow2_q16(bend);
     tsvf_t f;
+    if (!v->s[0])
+        return;                                          /* a ghost: the boom tail's keeper (pulsar_amp) */
     if (pv == PL_KICK) {
         /* KICK 30..90 Hz; DROP: the drop from 1 to 6 octaves up, in 15 to 70 ms; a click and a square's edge on the
-         * attack; SHP rings it (a partial at 2.76 times, ring-modulated); the grit turns the tail into a growl */
+         * attack (softer as SIZE goes muffled); TONE past the middle rings it (a partial at 2.76 times,
+         * ring-modulated: a metallic thud); the grit turns the tail into a growl */
         int32_t base10 = clamp(300 + p[P_E0] * 5 + m1 * 2, 200, 1400);
         uint32_t inc0 = pulsar_scale(pulsar_hz(base10), bq), incs, depth = 1u + (uint32_t)punch * 62u / 127u;
         int32_t sw = sweep >> 12, click = sweep > (13 << 20) ? (sweep >> 9) - 26624 : 0;
-        int32_t ring = shp > 0 ? shp >> 1 : 0;              /* Q15 */
+        int32_t ring = timbre > 64 ? (timbre - 64) * 400 : 0;   /* Q15 */
+        if (size < 0)
+            click = click * (64 + size) / 64;
         incs = inc0 + (uint32_t)(((uint64_t)inc0 * depth * (uint32_t)((sw * sw) >> 12)) >> 12);
         for (i = 0; i < n; i++) {
             int32_t s = osc_sine(ph0) + (osc_sine(ph0 * 2u) >> 3);
@@ -243,7 +264,7 @@ static void pulsar_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
          * noise register run at a crushed rate (lo-fi digital). ph[0] counts the samples since the hit (a square's
          * phase is that count times its increment), ph[1] the register, ph[2] its hold. SHAOS and PIT retune */
         uint32_t inc[6], j, cnt = ph0, reg = ph1 ? ph1 : 0x4001u, hold = ph2;
-        int32_t k = 4096 + 1024, ringmix = clamp((timbre - 42) * 780 + (shp > 0 ? shp : 0), 0, 32767);
+        int32_t k = 4096 + 1024, ringmix = clamp((timbre - 42) * 780, 0, 32767);
         int32_t dig = clamp((timbre - 85) * 780, 0, 32767);
         uint32_t crush = 1u + (uint32_t)clamp(timbre - 85, 0, 42) / 3u;   /* hold 1 .. 15 samples */
         for (j = 0; j < 6; j++)
@@ -302,22 +323,99 @@ static void pulsar_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
     v->ph[2] = ph2;
 }
 
-/* the part's sum, after its voices: a DC blocker (the grit's bias), then the glue: DRIVE pushes the whole kit into
- * a soft clipper with make-up gain, so hits squash together the way a hot analog bus does (x1.4 .. x3.3 in) */
-static int32_t pulsar_dc[NPART][2];
+/* The bus, after the part's voices: a DC blocker (the grit's bias), SIZE, then the glue (DRIVE pushes the whole kit into
+ * a soft clipper with make-up gain, so hits squash together as a hot analog bus does).
+ * SIZE (the ENV page's SHP, renamed: params.c), -64 .. 63:
+ *   below 0  muffled: two one-pole low-passes close over the kit (from open to ~500 Hz) and the glue eases off
+ *            (softer, rounder: soft electronic); the kick's click softens with it (render)
+ *   above 0  huge: a sub boost (+6 dB under ~100 Hz at the top), then a dark boom tail: a four-line feedback delay
+ *            network run at 1/8 rate (5.5 kHz: only the low end, which is what booms), its feedback and size growing
+ *            with SIZE (to a several-second rumble); past 24 the low band's envelope also feeds rolling low noise into
+ *            it: big hits leave thunder behind. One part at a time owns the tail (the first that asks).
+ * Memory: the tail's lines are 3248 int16 (6.5 KB) */
+static int32_t pulsar_bus[NPART][6];             /* DC (in, out), low-passes (2), the sub band, its envelope */
+static const uint16_t PB_LEN[PB_N] = {557u, 701u, 887u, 1103u};
+static int16_t pb_line[557u + 701u + 887u + 1103u] __attribute__((section(".pool")));
+
 static void pulsar_post(track_t *t, int32_t *out, uint32_t n, uint32_t nr)
 {
-    uint32_t part = (uint32_t)(t - trk) % NPART, i;
-    int32_t g = 5600 + t->p[P_E6] * 62, xin = pulsar_dc[part][0], yo = pulsar_dc[part][1];   /* Q12 */
+    uint32_t part = (uint32_t)(t - trk) % NPART, i, j;
+    int32_t *b = pulsar_bus[part], size = t->p[P_ED_SHP];
+    int32_t g = 5600 + t->p[P_E6] * 62, xin = b[0], yo = b[1], l1 = b[2], l2 = b[3], sub = b[4], env = b[5];
+    int32_t lpa = size < 0 ? 32767 - (-size) * 500 : 32767;    /* Q15 one-pole coefficient: 1 .. ~0.02 */
+    int32_t fb = size > 0 ? 24000 + size * 70 : 0, wet = size > 0 ? size * 460 : 0;   /* Q15: 0.73 .. 0.87 */
+    int32_t thunder = size > 24 ? (size - 24) * 700 : 0;
+    int tail = size > 0 && (pb.owner == part + 1u || !pb.owner);
     (void)nr;
+    if (size < 0)
+        g = g * (128 + size) / 128;                      /* the glue eases as it muffles */
+    if (tail && !pb.owner) {                             /* a new owner: the tail from silence */
+        memset(pb_line, 0, sizeof pb_line);
+        memset(&pb, 0, sizeof pb);
+        pb.owner = (uint8_t)(part + 1u);
+        pb.nz = 0x1F2E3D4C;
+    }
+    if (!tail && pb.owner == part + 1u)
+        pb.owner = 0;                                    /* SIZE back under 0: give it up */
     for (i = 0; i < n; i++) {
-        int32_t x = out[i], y = x - xin + yo - (yo >> 9);                   /* ~14 Hz high-pass */
+        int32_t x = out[i], y = x - xin + yo - (yo >> 9);        /* ~14 Hz high-pass */
         xin = x;
         yo = y;
-        out[i] = softclip((int32_t)(((int64_t)y * g) >> 13)) * 2;            /* half scale in, x2 out */
+        if (size < 0) {                                  /* muffled */
+            l1 += (int32_t)(((int64_t)(y - l1) * lpa) >> 15);
+            l2 += (int32_t)(((int64_t)(l1 - l2) * lpa) >> 15);
+            y = l2;
+        } else if (size > 0) {                           /* huge: the sub, its envelope */
+            int32_t a = y < 0 ? -y : y;
+            sub += (y - sub) >> 6;                       /* ~110 Hz one-pole */
+            y += (int32_t)(((int64_t)sub * size) >> 6);  /* up to x2 under it */
+            env += a > env ? (a - env) >> 6 : -(env >> 13) - (env > 0);   /* (the -1: it reaches 0) */
+        }
+        y = softclip((int32_t)(((int64_t)y * g) >> 13)) * 2;   /* the glue: half scale in, x2 out */
+        if (tail) {                                      /* the boom: in at 1/8 rate, out interpolated */
+            pb.acc += y >> 3;
+            if (++pb.k >= 8u) {
+                int32_t in = pb.acc, o[PB_N], sum = 0, h0, h1, h2, h3;
+                uint32_t base = 0;
+                pb.k = 0;
+                pb.acc = 0;
+                if (thunder) {                           /* rolling noise, as loud as the low band has just been */
+                    int32_t nzs = (int32_t)(noise32(&pb.nz) >> 17) - 16384;
+                    in += mulq15(mulq15(nzs, clamp(env * 2, 0, 32767)), thunder);
+                }
+                for (j = 0; j < PB_N; j++) {
+                    o[j] = pb_line[base + pb.w[j]];
+                    pb.damp[j] += (o[j] - pb.damp[j]) >> 1;   /* dark: a one-pole in each line */
+                    o[j] = pb.damp[j];
+                    sum += o[j];
+                    base += PB_LEN[j];
+                }
+                /* a Hadamard mix of the four, scaled by the feedback */
+                h0 = (o[0] + o[1] + o[2] + o[3]) >> 1;
+                h1 = (o[0] - o[1] + o[2] - o[3]) >> 1;
+                h2 = (o[0] + o[1] - o[2] - o[3]) >> 1;
+                h3 = (o[0] - o[1] - o[2] + o[3]) >> 1;
+                base = 0;
+                for (j = 0; j < PB_N; j++) {
+                    int32_t h = j == 0 ? h0 : j == 1 ? h1 : j == 2 ? h2 : h3;
+                    pb_line[base + pb.w[j]] = (int16_t)clamp(mulq15(h, fb) + (in >> 1), -32768, 32767);
+                    if (++pb.w[j] >= PB_LEN[j])
+                        pb.w[j] = 0;
+                    base += PB_LEN[j];
+                }
+                pb.out0 = pb.out1;
+                pb.out1 = mulq15(sum, wet);
+                {
+                    int32_t a = pb.out1 < 0 ? -pb.out1 : pb.out1;
+                    pb.lvl = a > pb.lvl ? a : pb.lvl - (pb.lvl >> 7) - 1;   /* a peak hold, falling (the ghost's cue) */
+                    if (pb.lvl < 0) pb.lvl = 0;
+                }
+            }
+            y += pb.out0 + (((pb.out1 - pb.out0) * (int32_t)pb.k) >> 3);
+        }
+        out[i] = y;
     }
-    pulsar_dc[part][0] = xin;
-    pulsar_dc[part][1] = yo;
+    b[0] = xin; b[1] = yo; b[2] = l1; b[3] = l2; b[4] = sub; b[5] = env;
 }
 
 /* the ENV page's four, renamed for PULSAR (params.c track_desc): the channels' decays (hits do not use the ADSR) */
@@ -327,9 +425,10 @@ static const param_desc_t PULSAR_DEC[4] = {
     {"M.DEC", F_TIME, 0, 127, 66, 0, 0},
     {"B.DEC", F_TIME, 0, 127, 84, 0, 0},
 };
+static const param_desc_t PULSAR_SIZE_D = {"SIZE", F_BIPCT, -64, 63, 0, 0, 0};   /* the ENV page's SHP, renamed */
 
 static const preset_t PULSAR_PRESETS[] = {
-    /* name, {KICK, DROP, SNARE, SNAP, TONE, SHAOS, DRIVE, SUST}, {K.DEC S.DEC M.DEC B.DEC}, fenv, mono */
+    /* name, {KICK, DROP, SNARE, SNAP, TONE, SHAOS, DRIVE, SUST}, {K.DEC S.DEC M.DEC B.DEC}, fenv, mono; SIZE: PULSAR_SIZE */
     {"PULSAR", {48, 70, 50, 70, 20, 0, 60, 0}, {94, 74, 66, 84}, 0, 0},
     {"PULVERISE", {40, 90, 40, 90, 60, 30, 118, 0}, {98, 80, 72, 88}, 0, 0},
     {"DEEP SUB", {20, 40, 30, 50, 10, 0, 46, 0}, {108, 70, 60, 100}, 0, 0},
@@ -340,7 +439,22 @@ static const preset_t PULSAR_PRESETS[] = {
     {"SHAOS", {40, 100, 64, 96, 90, 116, 100, 0}, {100, 84, 86, 96}, 0, 0},
     {"INDUSTRY", {36, 110, 80, 84, 100, 40, 122, 0}, {90, 76, 74, 80}, 0, 0},
     {"WOOD", {58, 30, 96, 20, 20, 10, 30, 0}, {70, 52, 50, 60}, 0, 0},
+    {"HUGE", {34, 96, 44, 74, 30, 10, 84, 0}, {104, 84, 80, 96}, 0, 0},
+    {"THUNDER", {18, 120, 30, 100, 40, 40, 100, 0}, {112, 96, 96, 108}, 0, 0},
+    {"SOFT", {44, 40, 56, 40, 10, 0, 12, 0}, {84, 66, 56, 80}, 0, 0},
+    {"MUFFLED", {38, 50, 40, 60, 20, 16, 30, 0}, {96, 76, 70, 90}, 0, 0},
 };
+#define ENG_PULSAR_NPRESETS NELEM(PULSAR_PRESETS)
+static const int8_t PULSAR_SIZE[ENG_PULSAR_NPRESETS] = {10, 20, 30, 0, 40, 30, 16, 24, 20, -10, 44, 63, -36, -58};
+
+/* a factory kit loaded (ui.c apply_preset_to): its SIZE, which lives outside the preset's EDIT values */
+static void pulsar_preset_loaded(track_t *t, uint32_t pi)
+{
+    if (t->eng_req == ENGI_PULSAR && pi < ENG_PULSAR_NPRESETS)
+        t->p[P_ED_SHP] = PULSAR_SIZE[pi];
+}
+
+
 
 static const engine_t ENG_PULSAR = {
     .name = "PULSAR",
@@ -357,7 +471,7 @@ static const engine_t ENG_PULSAR = {
     },
     .presets = PULSAR_PRESETS,
     .npresets = NELEM(PULSAR_PRESETS),
-    .knob = {P_E6, P_E2, P_E3, P_E5},     /* DRIVE, SNARE, SNAP, SHAOS */
+    .knob = {P_E6, P_E3, P_E5, P_ED_SHP},     /* DRIVE, SNAP, SHAOS, SIZE */
     .poly = 8,
     .oneshot = 1,
     .note_on = pulsar_note_on,
