@@ -525,6 +525,34 @@ static int32_t accel(uint32_t role, int32_t s, int32_t range)
 {
     return range <= 24 ? s : accel_by(role, s, range < 100 ? 3u : range > 150 ? 16u : 8u, 0);
 }
+
+/* fork: the filter's knobs (a cutoff; RES, EMPH, CNTR, STATE) turn like a Minimoog's dial. A slow turn is still one
+ * step a detent, for precise placing; a turn speeds up from its second quick detent (not the fourth) and goes further
+ * (x12), so one quick turn sweeps the whole range. The engines glide between the steps, so a fast sweep is a sweep,
+ * not a staircase. KNOB ACCEL OFF and MIDI-driven knobs keep one step a detent, as accel_by. */
+#define SWEEP_SPIN 2u
+static int sweep_param(const param_desc_t *d)
+{
+    return d->fmt == F_CUTOFF || (d->label && (str_eq(d->label, "RES") || str_eq(d->label, "EMPH") ||
+                                               str_eq(d->label, "CNTR") || str_eq(d->label, "STATE")));
+}
+static int32_t accel_sweep(uint32_t role, int32_t s)
+{
+    uint32_t now = fm1_ms & 0xFFFFFFu, st = ui.enc_t[role % NE], up = s > 0, run = st >> 25, a, dt, m = 1;
+    if ((PREF_BITS & PREF_ACCEL_OFF) || (midi_panel_mask & (1u << (role % NE))) || !s)
+        return s;
+    a = (uint32_t)(s < 0 ? -s : s);
+    dt = ((now - st) & 0xFFFFFFu) / a;
+    if (!st || ((st >> 24) & 1u) != up || dt >= ACC_GAP) {
+        run = 1;
+    } else {
+        run++;
+        if (run >= SWEEP_SPIN)
+            m = dt < 10u ? 12u : dt < 18u ? 8u : dt < 28u ? 5u : dt < 42u ? 3u : dt < 52u ? 2u : 1u;
+    }
+    ui.enc_t[role % NE] = now | up << 24 | (run > 127u ? 127u : run) << 25;
+    return s * (int32_t)m;
+}
 static int32_t desc_range(const param_desc_t *d)     /* (a list of names: no acceleration) */
 {
     return d->fmt == F_ENUM ? 0 : d->max - d->min;
@@ -1124,7 +1152,8 @@ static void edit_param(uint32_t slot, int32_t steps)
             v = enum_value(d, (midi_edit_value * (enum_rows(d) - 1) + 63) / 127);
         } else v = enum_step(d, *vp, d->min + (midi_edit_value * (d->max - d->min) + 63) / 127);
     } else {
-        v = accel(EN_K1 + slot, steps, desc_range(d));
+        v = d->fmt != F_ENUM && sweep_param(d) && d->max - d->min > 24 ? accel_sweep(EN_K1 + slot, steps)
+                                                                        : accel(EN_K1 + slot, steps, desc_range(d));
         v = fx_names(d) ? fx_step(d, *vp, v) : enum_step(d, *vp, clamp(*vp + v, d->min, d->max));
     }
     if (pg->scope == SC_TRACK && pg->graph == GR_FXRACK && slot == 0u && *vp != v && fx_is_midi(v)) {

@@ -33,6 +33,35 @@ static inline int32_t sem_calib(const track_t *t, const voice_t *v)
     return (int32_t)(seed >> 24) - 128;
 }
 
+/* fork: CUT and RES glide (about 60 ms a block's one-pole, exact landing; silent: snap), so the knob's detents and the
+ * sweep knobs' bigger steps become ramps. Per part, written once a block before its voices (read-only in them). */
+static int32_t sem_sm[NPART][2];                   /* Q16 */
+static uint8_t sem_sm_ok;
+static void sem_block(track_t *t)
+{
+    uint32_t part = (uint32_t)(t - trk), i, j;
+    static const uint8_t KN[2] = {P_E4, P_E5};
+    if (part >= NPART)
+        return;
+    for (i = 0; i < NVOICE && !t->v[i].active; i++)
+        ;
+    for (j = 0; j < 2; j++) {
+        int32_t want = (int32_t)clamp(t->p[KN[j]], 0, 127) << 16, d = want - sem_sm[part][j], st;
+        if (i == NVOICE || !(sem_sm_ok & (1u << part))) {
+            sem_sm[part][j] = want;
+            continue;
+        }
+        st = d >= 0 ? (int32_t)(((int64_t)d * 790) >> 16) : -(int32_t)(((int64_t)-d * 790) >> 16);
+        if (!st)
+            st = d > 0 ? 1 : d < 0 ? -1 : 0;
+        sem_sm[part][j] += st;
+    }
+    if (i == NVOICE)
+        sem_sm_ok &= (uint8_t)~(1u << part);
+    else
+        sem_sm_ok |= (uint8_t)(1u << part);
+}
+
 static void sem_note_on(track_t *t, voice_t *v)
 {
     uint32_t lane = (uint32_t)(v - t->v), part = (uint32_t)(t - trk);
@@ -81,8 +110,12 @@ static void sem_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const v
     fixed = calib * vint * 10 / 127;
     uint32_t inc0 = sem_tune(m->inc, fixed + drift);
     uint32_t inc1 = sem_tune(cents_inc(m->pitch16, p[P_E2], m->fine), -fixed + drift / 2);
-    cut = p[P_E4] * 256 + m->cutoff + (calib * vint / 64);
-    k = 8192 - p[P_E5] * 6500 / 127;  /* finite resonance: no self oscillation */
+    {
+        uint32_t part = (uint32_t)(t - trk);
+        int32_t c16 = part < NPART ? sem_sm[part][0] : p[P_E4] << 16, r16 = part < NPART ? sem_sm[part][1] : p[P_E5] << 16;
+        cut = (c16 >> 8) + m->cutoff + (calib * vint / 64);
+        k = 8192 - (int32_t)(((int64_t)r16 * 6500 / 127) >> 16);  /* finite resonance: no self oscillation */
+    }
     tsvf_coef_k(&f, cut, k);
     /* Bound a live STATE jump to three knob steps per block and ramp each sample. */
     state1 = state0 + clamp(sem_state(p[P_E6]) - state0, -768, 768);
@@ -138,5 +171,6 @@ static const engine_t ENG_SEM = {
     .knob = {P_E4, P_E5, P_E6, P_E7},
     .note_on = sem_note_on,
     .render = sem_render,
+    .block = sem_block,
     .keep = 0x33,                /* s[0] s[1] s[4] s[5]: filter and drift over a retrigger */
 };

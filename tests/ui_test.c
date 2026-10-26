@@ -1554,6 +1554,30 @@ static int test_browser(void)
     fm1_ms += 6u; ok &= accel_by(EN_K1, -1, 8u, &f1) == -1 && !f1;
     PREF_BITS &= (uint8_t)~PREF_ACCEL_OFF;
     bad += check("ACCEL: narrow values and lists of names keep a step a detent; MENU KNOB ACCEL OFF: always", ok);
+    {   /* fork: the filter's knobs */
+        int32_t sum = 0;
+        memset(ui.enc_t, 0, sizeof ui.enc_t);
+        fm1_ms += 1000u;
+        ok = 1;
+        for (i = 0; i < 6u; i++) {                       /* a slow turn: precise, one step a detent */
+            fm1_ms += 80u; ok &= accel_sweep(EN_K2, 1) == 1;
+        }
+        fm1_ms += 300u;
+        for (i = 0; i < 14u; i++) {                      /* one quick turn of 14 detents (8 ms apart) */
+            fm1_ms += 8u; sum += accel_sweep(EN_K2, 1);
+        }
+        ok &= sum >= 127;
+        fm1_ms += 300u; ok &= accel_sweep(EN_K2, -1) == -1;   /* a pause: back to one step */
+        ok &= sweep_param(&(param_desc_t){"CUT", F_CUTOFF, 0, 127, 0, 0, 0}) &&
+              sweep_param(&(param_desc_t){"EMPH", F_PCT, 0, 127, 0, 0, 0}) &&
+              !sweep_param(&(param_desc_t){"DTN", F_INT, 0, 50, 0, 0, 0});
+        PREF_BITS |= PREF_ACCEL_OFF;
+        fm1_ms += 5u; ok &= accel_sweep(EN_K2, -1) == -1;
+        fm1_ms += 5u; ok &= accel_sweep(EN_K2, -1) == -1;
+        PREF_BITS &= (uint8_t)~PREF_ACCEL_OFF;
+        bad += check("SWEEP: the filter's knobs: a slow turn one step a detent, one quick turn of 14 detents the whole "
+                     "range, KNOB ACCEL OFF one step", ok);
+    }
 
     ui_power_on();                                       /* the browser's keys: OCT- back, OCT+ keep, both to Stage */
     PREF_BITS |= PREF_ACCEL_OFF;

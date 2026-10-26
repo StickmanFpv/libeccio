@@ -70,14 +70,15 @@ static void moog_block(track_t *t)
     moog_tick[part]++;
     for (i = 0; i < NVOICE && !t->v[i].active; i++)
         ;
-    /* one encoder click = 1/127: a one-pole per block, about 200 ms, exact landing; silent: snap */
+    /* one encoder click = 1/127: a one-pole per block, about 60 ms (FMini-1 used 200; the fork's sweep knobs take
+     * bigger steps a detent and want a quicker follow), exact landing; silent: snap */
     for (j = 0; j < 3; j++) {
         int32_t want = (int32_t)clamp(t->p[KN[j]], 0, 127) << 16, d = want - moog_sm[part][j], st;
         if (i == NVOICE || !(moog_sm_ok & (1u << part))) {
             moog_sm[part][j] = want;
             continue;
         }
-        st = d >= 0 ? (int32_t)(((int64_t)d * 238) >> 16) : -(int32_t)(((int64_t)-d * 238) >> 16);
+        st = d >= 0 ? (int32_t)(((int64_t)d * 790) >> 16) : -(int32_t)(((int64_t)-d * 790) >> 16);
         if (!st)
             st = d > 0 ? 1 : d < 0 ? -1 : 0;
         moog_sm[part][j] += st;
