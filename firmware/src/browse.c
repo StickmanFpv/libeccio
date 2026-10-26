@@ -25,6 +25,7 @@ static const char *const PRESET_CAT[NENGINES] = {
     [ENGI_SEM] = "RPSBPLPK",                            /* SEM: BRASS PAD STRING BASS PAD LEAD PAD KEYS */
     [ENGI_HADES] = "BBBBBBUL",                          /* HADES: basses, DARK PLK, RAW LEAD */
     [ENGI_MOOG] = "BBLLRPWULB",                         /* MOOG */
+    [ENGI_PULSAR] = "DDDDDD",                           /* PULSAR: kits */
 #if MELODEE_LEGACY_EXTRAS                                /* (retired: PHASE VOICE NOISE) */
     [2] = "RGSLEU",                                     /* PHASE: BRASS ORGAN STRING RESO BELL WIRE */
     [5] = "PLBF",                                       /* VOICE: CHOIR AAH, VOX LEAD, WOW BASS, WHISPER */
@@ -38,7 +39,7 @@ static const char *const PRESET_CAT[NENGINES] = {
         "OOOKBPROOOGKLPWPOLOUUBEOEGFPOOBOEOOODDDEOOGKSGBPEPPLBROOOOPOKPKOFOSOOEPRODFLFOOEOULWOPBOLOPKFORGLPOBULROOSKOO"
         "PSBUEFDEEEWEUOUEOOOOSERPUOBOOOBOFLGUGRLOOOBUFOOFEUFORSKKWKLGLGGKROGBGLKSLOOFOFOFLUUEFFEOFEPF",
 };
-static uint32_t cat_of_engine(uint32_t e) { return e == ENGI_DRUM ? CAT_DRUM : e == 11u ? CAT_FX : CAT_OTHER; }
+static uint32_t cat_of_engine(uint32_t e) { return e == ENGI_DRUM || e == ENGI_PULSAR ? CAT_DRUM : e == 11u ? CAT_FX : CAT_OTHER; }
 static uint32_t preset_cat(uint32_t e, uint32_t k)           /* factory preset k of engine e */
 {
     const char *s = e < NENGINES ? PRESET_CAT[e] : 0;
