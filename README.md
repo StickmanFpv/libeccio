@@ -23,7 +23,7 @@ test suite; CPU load on the FM-1 is not measured yet. Keep a backup and the offi
 They come first in the sound browser; Melodee's PROPHET, FM6, CZ-1, SID and DRUM follow.
 
 **Knobs.** On the main page MOOG, SEM and HADES put cutoff, resonance, envelope amount and release on the four knobs
-(PULSAR: DRIVE, SNARE tune, SNAP, SHAOS). The filter knobs turn like a Minimoog's dial: a slow turn is one step a detent, a
+(PULSAR: DRIVE, SNAP, SHAOS and SIZE: muffled to thunder). The filter knobs turn like a Minimoog's dial: a slow turn is one step a detent, a
 quick turn speeds up from its second detent (up to x12), so one quick turn sweeps the whole range, and the engines
 glide between the steps.
 
