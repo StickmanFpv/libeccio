@@ -144,7 +144,7 @@ static const engine_t ENG_HADES = {
     },
     .presets = HADES_PRESETS,
     .npresets = NELEM(HADES_PRESETS),
-    .knob = {P_E4, P_E5, P_E6, P_E7},
+    .knob = {P_E4, P_E5, P_ED_FLT, P_REL},    /* fork: cutoff, resonance, envelope amount, release */
     .note_on = hades_note_on,
     .render = hades_render,
     .keep = 0x33,                /* s[0] s[1] s[4] s[5]: filter and shelf over a retrigger (note_on keeps s[2] s[3]) */

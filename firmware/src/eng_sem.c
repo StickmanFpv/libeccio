@@ -168,7 +168,7 @@ static const engine_t ENG_SEM = {
     },
     .presets = SEM_PRESETS,
     .npresets = NELEM(SEM_PRESETS),
-    .knob = {P_E4, P_E5, P_E6, P_E7},
+    .knob = {P_E4, P_E5, P_ED_FLT, P_REL},    /* fork: cutoff, resonance, envelope amount, release */
     .note_on = sem_note_on,
     .render = sem_render,
     .block = sem_block,

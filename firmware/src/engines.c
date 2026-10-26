@@ -185,9 +185,9 @@ static const preset_t *eng_preset(const engine_t *e, uint32_t k)
  * engine indices, never a retired one. The indices stay as they are (the
  * stores and the protocol hold them); only this table orders them */
 static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {
+    ENGI_MOOG, ENGI_SEM, ENGI_HADES, ENGI_PULSAR,   /* fork: its own engines first */
     ENGI_PROPHET,                /* Prophet replaces ANALOG in new-sound browsing */
     12,                          /* FM6 */
-    ENGI_MOOG, ENGI_SEM, ENGI_HADES, ENGI_PULSAR,   /* fork */
 #if MELODEE_LEGACY_EXTRAS
     2, ENGI_CZ, 3, 5,             /* PHASE CZ-1 SID VOICE */
     6, 7, 9,
