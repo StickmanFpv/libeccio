@@ -23,6 +23,8 @@
 #endif
 #include "eng_fm6.c"            /* FM6: 6-operator FM rendered as Dexed renders it (fm6_core.c) */
 #include "eng_midi.c"
+#include "eng_hades.c"          /* HADES: dark sub-bass synth (Caravel, GPL-3.0) */
+#include "eng_sem.c"            /* SEM: Oberheim-style state-variable synth (Caravel, GPL-3.0) */
 #if MELODEE_SLICE
 #include "eng_slice.c"
 #else
@@ -151,6 +153,8 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_P5_TEST,                /* 19: Prophet (ANALOG's ID 0 stays reserved) */
     &ENG_RETIRED,                /* 20: Prophet user-preset namespace */
     &ENG_MIDI,                   /* 21: USB MIDI Track */
+    &ENG_SEM,                    /* 22: SEM */
+    &ENG_HADES,                  /* 23: HADES */
 };
 
 /* a track's engine number as an index (the audio paths: a compare, cheaper than % NENGINES; a bad number: 0) */
@@ -179,6 +183,7 @@ static const preset_t *eng_preset(const engine_t *e, uint32_t k)
 static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {
     ENGI_PROPHET,                /* Prophet replaces ANALOG in new-sound browsing */
     12,                          /* FM6 */
+    ENGI_SEM, ENGI_HADES,        /* fork */
 #if MELODEE_LEGACY_EXTRAS
     2, ENGI_CZ, 3, 5,             /* PHASE CZ-1 SID VOICE */
     6, 7, 9,
