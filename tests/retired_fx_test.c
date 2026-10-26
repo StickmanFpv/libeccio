@@ -62,7 +62,7 @@ static void controls(void)
     assert(enum_step(&TP[P_FXTYPE],FX_OFF,FX_OFF+1)==FX_MIDIVERB);
     assert(enum_step(&TP[P_FXTYPE],FX_MIDIVERB,FX_MIDIVERB+1)==FX_MIDIDELAY);
     assert(enum_orig(&TP[P_FXTYPE],FX_REVERB)==FX_OFF);
-    assert(enum_rows(&TP[P_FXTYPE])==3 && enum_rows(&GP[G_MFXTYPE])==14);
+    assert(enum_rows(&TP[P_FXTYPE])==3 && enum_rows(&GP[G_MFXTYPE])==15);
     press(B_FX);assert(cur_page()->fam==FAM_FX);
     btn_down(B_FX);frames(800);assert(ui.layer==LAYER_FX);
     key_down(white(0));frame();assert(!gates() && kb_layer);key_up(white(0));frame();assert(!gates());

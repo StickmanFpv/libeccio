@@ -706,9 +706,12 @@ static void pv_fx(int32_t h)
     int32_t low = (strip ? sy - 6 : failed || type == FX_WIDTH ? h - lf->h - 10 : h - 8) * 16;
     int32_t cy = (top + low) / 2, amp = (low - top) / 2;
     uint16_t th = type && mix ? T_THEME : T_DIM, gh = ux_mix(T_PANEL, th, 38);
-    if (type == FX_ROOM || type == FX_REVERB) {         /* the tail: SIZE long (ROOM: DECAY too), its highs lighter */
-        int32_t len = type == FX_ROOM ? 30 + rate * 70 / 127 + cha * 60 / 127 : 40 + rate * 150 / 127;
-        int32_t kb = 32768 - 9 * 32768 / len, kh = 32768 - 9 * 32768 * 10 / (len * (10 - (type == FX_REVERB ? cha * 7 / 127 : 5)));
+    if (type == FX_ROOM || type == FX_REVERB || type == FX_MASSIVE) {   /* the tail: SIZE long (ROOM: DECAY too), its
+                                                                    * highs lighter; MASSIVE: longer still, its MODE's */
+        int32_t len = type == FX_ROOM ? 30 + rate * 70 / 127 + cha * 60 / 127 : type == FX_MASSIVE ?
+                      90 + rate * rate * 600 / 16129 : 40 + rate * 150 / 127;
+        int32_t dk = type == FX_REVERB ? cha * 7 / 127 : type == FX_MASSIVE ? (cha == 5 ? 8 : cha == 1 || cha == 4 ? 6 : 3) : 5;
+        int32_t kb = 32768 - 9 * 32768 / len, kh = 32768 - 9 * 32768 * 10 / (len * (10 - dk));
         int32_t eb = 32767, eh = 32767, base = low >> 4, hgt = (low - top) >> 4;
         uint32_t r = 0x2545F491u;
         uint16_t hc = ux_mix(th, T_TEXT, 55);

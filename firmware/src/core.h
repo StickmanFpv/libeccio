@@ -148,12 +148,12 @@ enum {                          /* per-track parameters */
 #define FX_SLOTS 3u
 #define FX_PARAMS 4u
 /* Append-only effect IDs; shared pickers leave MIDI-only IDs empty. */
-enum { FX_OFF, FX_PHASER, FX_WIDTH, FX_FORMANT, FX_TAPE, FX_SPIT, FX_ECHO, FX_ROOM, FX_REVERB, FX_CHORUS, FX_AUDIO_COUNT, FX_MIDIVERB = FX_AUDIO_COUNT, FX_MIDIDELAY, FX_SOFT, FX_HARD, FX_FOLD, FX_FUZZ, FX_CRUSH, FX_FLANGER, FX_PEDAL_PHASER, FX_PEDAL_CHORUS, FX_COUNT };
+enum { FX_OFF, FX_PHASER, FX_WIDTH, FX_FORMANT, FX_TAPE, FX_SPIT, FX_ECHO, FX_ROOM, FX_REVERB, FX_CHORUS, FX_AUDIO_COUNT, FX_MIDIVERB = FX_AUDIO_COUNT, FX_MIDIDELAY, FX_SOFT, FX_HARD, FX_FOLD, FX_FUZZ, FX_CRUSH, FX_FLANGER, FX_PEDAL_PHASER, FX_PEDAL_CHORUS, FX_MASSIVE, FX_COUNT };   /* fork: MASSIVE (fx_massive.h) */
 /* Slot 6 stays retired. Slot 8 is the SLOOP reverb replacement. */
 static int fx_retired(int32_t type) { return type == FX_ECHO; }
 static int fx_sloop_type(int32_t t){return t>=FX_SOFT && t<=FX_PEDAL_CHORUS;}
 static int fx_sloop_swept(int32_t t){return t>=FX_FLANGER && t<=FX_PEDAL_CHORUS;}
-static int fx_third_control(int32_t t){return fx_sloop_swept(t) || t==FX_ROOM || t==FX_REVERB;}
+static int fx_third_control(int32_t t){return fx_sloop_swept(t) || t==FX_ROOM || t==FX_REVERB || t==FX_MASSIVE;}
 static int fx_is_midi(int32_t type) { return type == FX_MIDIVERB || type == FX_MIDIDELAY; }
 #define FX_CHAIN_COUNT 1u /* the shared rack only; tracks retain note-effect controls */
 #define FX_STATE_COUNT (FX_CHAIN_COUNT*FX_SLOTS)
@@ -164,7 +164,7 @@ static void track_fx_normalize(int16_t *p)
     for(uint32_t slot=0;slot<FX_SLOTS;slot++)p[P_FXTYPE+slot*FX_PARAMS]=(int16_t)fx_track_type(p[P_FXTYPE+slot*FX_PARAMS]);
 }
 static int param_fx_tone(uint32_t id) { return id>=P_FXTONE && id<=P_FX3TONE; }
-static int fx_has_tone(int32_t type) { return type==FX_ROOM || type==FX_REVERB; }   /* fx.c FX_ECHO, FX_ROOM, FX_REVERB */
+static int fx_has_tone(int32_t type) { return type==FX_ROOM || type==FX_REVERB || type==FX_MASSIVE; }   /* fx.c FX_ECHO, FX_ROOM, FX_REVERB */
 static int param_fx(uint32_t id) { return (id>=P_FXTYPE && id<=P_FX3CHAR) || param_fx_tone(id); }
 /* TONE -63..63 -> the cut it sets (Hz), 0 = FULL (none but the effect's own floor, fx_floor_hz): below 0 a high cut,
  * 2640 Hz at -1 down to 120 Hz at -63; above 0 a low cut, 150 Hz at 1 up to 1280 Hz at 63 (squared: fine steps where
@@ -179,7 +179,7 @@ static int32_t fx_tone_hz(int32_t v)
 #define FX_FLOOR_ECHO 100
 #define FX_FLOOR_SPACE 150
 static int32_t fx_floor_hz(int32_t type) {
-    return type==FX_REVERB ? 0 : FX_FLOOR_SPACE;
+    return type==FX_REVERB || type==FX_MASSIVE ? 0 : FX_FLOOR_SPACE;
 }
 static int32_t fx_low_cut_hz(int32_t type, int32_t v)   /* an ECHO / ROOM / REVERB slot's low cut at TONE v */
 {

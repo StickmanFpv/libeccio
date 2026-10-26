@@ -11,15 +11,17 @@ static const char *const N_RECQ[] = {"OFF", "1/4", "1/8", "1/16", "1/32", "8T", 
 static const char *const N_LTRIG[] = {"NOTE", "FREE"};
 static const char *const N_LPOL[] = {"BI", "UNI"};
 /* SOFT .. FUZZ are one DRIVE, their SHAPE on KNOB 4 (N_SHAPE) */
-static const char *const N_FX[] = {"OFF", "PHASER", "WIDTH", "FORMANT", "TAPE", "SPIT", "", "ROOM", "REVERB", "CHORUS", "NOTE TAIL", "NOTE ECHO", "DRIVE", "DRIVE", "DRIVE", "DRIVE", "CRUSH", "FLANGER", "PEDAL PHASER", "PEDAL CHORUS"};
-static const char *const N_NOTE_FX[FX_COUNT] = {"OFF", "", "", "", "", "", "", "", "", "", "NOTE TAIL", "NOTE ECHO", "", "", "", "", "", "", "", ""};
-static const char *const N_AUDIO_FX[] = {"OFF", "PHASER", "WIDTH", "FORMANT", "TAPE", "SPIT", "", "ROOM", "REVERB", "CHORUS", "", "", "DRIVE", "DRIVE", "DRIVE", "DRIVE", "CRUSH", "FLANGER", "PEDAL PHASER", "PEDAL CHORUS"};
+static const char *const N_FX[] = {"OFF", "PHASER", "WIDTH", "FORMANT", "TAPE", "SPIT", "", "ROOM", "REVERB", "CHORUS", "NOTE TAIL", "NOTE ECHO", "DRIVE", "DRIVE", "DRIVE", "DRIVE", "CRUSH", "FLANGER", "PEDAL PHASER", "PEDAL CHORUS", "MASSIVE"};
+#define MV_NMODE 6u                       /* fork: MASSIVE's modes (fx_massive.h MV_MODE) */
+static const char *const N_MASSIVE[MV_NMODE] = {"HALL", "NAVE", "SPACE", "ECHO", "CLOUD", "DEEP"};   /* hall, cathedral, space, echoes, nebula, submarine */
+static const char *const N_NOTE_FX[FX_COUNT] = {"OFF", "", "", "", "", "", "", "", "", "", "NOTE TAIL", "NOTE ECHO", "", "", "", "", "", "", "", "", ""};
+static const char *const N_AUDIO_FX[] = {"OFF", "PHASER", "WIDTH", "FORMANT", "TAPE", "SPIT", "", "ROOM", "REVERB", "CHORUS", "", "", "DRIVE", "DRIVE", "DRIVE", "DRIVE", "CRUSH", "FLANGER", "PEDAL PHASER", "PEDAL CHORUS", "MASSIVE"};
 static const char *const N_SHAPE[FX_FUZZ + 1u] = {[FX_SOFT] = "SOFT", [FX_HARD] = "HARD", [FX_FOLD] = "FOLD", [FX_FUZZ] = "FUZZ"};
 /* the effects as the picker and the list give them (README "FX rack"), in families: Space, Motion, Dirt, Colour,
  * Notes (the track's racks only: the last two); DRIVE stands for SOFT .. FUZZ. The stored IDs keep their numbers */
-static const uint8_t FX_ORDER[] = {FX_OFF, FX_ROOM, FX_REVERB, FX_WIDTH, FX_PHASER, FX_CHORUS, FX_FLANGER, FX_PEDAL_PHASER,
+static const uint8_t FX_ORDER[] = {FX_OFF, FX_ROOM, FX_REVERB, FX_MASSIVE, FX_WIDTH, FX_PHASER, FX_CHORUS, FX_FLANGER, FX_PEDAL_PHASER,
                                    FX_PEDAL_CHORUS, FX_SOFT, FX_CRUSH, FX_FORMANT, FX_TAPE, FX_SPIT, FX_MIDIDELAY, FX_MIDIVERB};
-static const uint8_t FX_FAM_FIRST[] = {0, 1, 4, 9, 11, 14, 16};   /* each family's first place in FX_ORDER */
+static const uint8_t FX_FAM_FIRST[] = {0, 1, 5, 10, 12, 15, 17};   /* each family's first place in FX_ORDER */
 static const char *const FX_FAM_NAME[] = {"Off", "Space", "Motion", "Dirt", "Colour", "Notes"};
 enum { FXF_OFF, FXF_SPACE, FXF_MOTION, FXF_DIRT, FXF_COLOUR, FXF_NOTES };
 static int fx_names(const param_desc_t *d) { return d->names == N_FX || d->names == N_AUDIO_FX; }
@@ -332,10 +334,11 @@ static const param_desc_t *global_desc(uint32_t id)
 {
     if(id>=G_MFXTONE && id<=G_MFX3TONE){uint32_t type=song.g[G_MFXTYPE+(id-G_MFXTONE)*FX_PARAMS];if(fx_sloop_swept(type))return fx_pedal_desc(type,4,&GP[id]);}
     if(param_master_fx(id) && (id-G_MFXTYPE)%FX_PARAMS>=2u){
-        static param_desc_t d;static const char *const character[]={"CHAR","DEPTH","DEPTH","FOCUS","JITTER","BITE","REPEAT","DECAY","DAMP","DEPTH","","","TONE","TONE","TONE","TONE","ALIAS","DEPTH","DEPTH","DEPTH"};
+        static param_desc_t d;static const char *const character[]={"CHAR","DEPTH","DEPTH","FOCUS","JITTER","BITE","REPEAT","DECAY","DAMP","DEPTH","","","TONE","TONE","TONE","TONE","ALIAS","DEPTH","DEPTH","DEPTH","MODE"};
         uint32_t base=G_MFXTYPE+(id-G_MFXTYPE)/FX_PARAMS*FX_PARAMS,type=(uint32_t)clamp(song.g[base],0,NELEM(N_AUDIO_FX)-1);d=GP[id];
         if(fx_sloop_type(type))return fx_pedal_desc(type,id-base,&GP[id]);
         if(id-base==3u)d.label=character[type];else if(type>=6u && type<=8u){d.label=type==6u?"TIME":"SIZE";d.fmt=F_PCT;}
+        if(type==FX_MASSIVE){if(id-base==3u){d.fmt=F_ENUM;d.names=N_MASSIVE;d.min=0;d.max=MV_NMODE-1;}else{d.label="SIZE";d.fmt=F_PCT;}}   /* fork */
         return &d;
     }
     return &GP[id];
@@ -363,12 +366,13 @@ static const param_desc_t *track_desc(const track_t *t, uint32_t id)
     }
     if (param_fx(id) && !param_fx_tone(id) && ((id-P_FXTYPE)%FX_PARAMS)>=2u) {
         static param_desc_t fx_desc;
-        static const char *const character[] = {"CHAR", "DEPTH", "DEPTH", "FOCUS", "JITTER", "BITE", "REPEAT", "DECAY", "DAMP", "DEPTH", "", "", "TONE", "TONE", "TONE", "TONE", "ALIAS", "DEPTH", "DEPTH", "DEPTH"};
+        static const char *const character[] = {"CHAR", "DEPTH", "DEPTH", "FOCUS", "JITTER", "BITE", "REPEAT", "DECAY", "DAMP", "DEPTH", "", "", "TONE", "TONE", "TONE", "TONE", "ALIAS", "DEPTH", "DEPTH", "DEPTH", "MODE"};
         uint32_t base=P_FXTYPE+(id-P_FXTYPE)/FX_PARAMS*FX_PARAMS;
         fx_desc=TP[id];uint32_t type=(uint32_t)clamp(t->p[base],0,NELEM(N_FX)-1);
         if(fx_sloop_type(type))return fx_pedal_desc(type,id-base,&TP[id]);
         if(id-base==3u)fx_desc.label=character[type];
         else if(type>=6u && type<=8u){fx_desc.label=type==6u?"TIME":"SIZE";fx_desc.fmt=F_PCT;}
+        if(type==FX_MASSIVE){if(id-base==3u){fx_desc.fmt=F_ENUM;fx_desc.names=N_MASSIVE;fx_desc.min=0;fx_desc.max=MV_NMODE-1;}else{fx_desc.label="SIZE";fx_desc.fmt=F_PCT;}}   /* fork */
         return &fx_desc;
     }
     if (t->eng_req == 2u && id >= P_FM1_ATK && id <= P_FM4_LEVEL)

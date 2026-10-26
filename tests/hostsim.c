@@ -430,7 +430,7 @@ static int steal_test(const char *dir)
     const uint32_t frames = 4u * FS;
     char path[512];
     FILE *w;
-    int32_t prev = 0, *L = calloc(frames, sizeof *L);
+    int32_t prev = 0, *L = calloc(frames + CTL, sizeof *L);
     uint32_t f, i, p, k, events[6], nev = 0, bad = 0, kills0;
     double worst = 0;
     snprintf(path, sizeof path, "%s/steal.wav", dir);
@@ -514,7 +514,7 @@ static int xfade_test(const char *dir)
     const uint8_t to[4] = {ENGI_FM6, 2, 3, 4};
     char path[512];
     FILE *w;
-    int32_t *L = calloc(frames, sizeof *L);
+    int32_t *L = calloc(frames + CTL, sizeof *L);
     uint32_t f, i, k, bad = 0, late_ok = 0;
     double worst = 0;
     track_t *t = &trk[0];
@@ -906,6 +906,12 @@ int main(int argc, char **argv)
             if (*s == ',')
                 s++;
         }
+    }
+    if (getenv("MFX")) {                                /* fork: MFX=type,mix,rate,char,send: the shared rack's slot 1 */
+        int ty = 0, mx = 0, ra = 0, ch = 0, se = 0;
+        sscanf(getenv("MFX"), "%d,%d,%d,%d,%d", &ty, &mx, &ra, &ch, &se);
+        song.g[G_MFXTYPE] = (int16_t)ty; song.g[G_MFXMIX] = (int16_t)mx; song.g[G_MFXRATE] = (int16_t)ra;
+        song.g[G_MFXCHAR] = (int16_t)ch; song.g[G_FXRETURN] = 100; inst.p[P_FXSEND] = (int16_t)se;
     }
     if (getenv("STEPS")) {                              /* STEPS=n,n,...: a pattern (0 = rest) played by the sequencer */
         const char *s = getenv("STEPS");

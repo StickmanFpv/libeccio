@@ -28,6 +28,12 @@ SEM, HADES and PULSAR.
 four knobs always shown as rings of dots, and under them the MIDI channels in use, each lit as the KO II plays it.
 Melodee's track rows give way to it (the sequencer pages are all still there).
 
+**MASSIVE reverb.** A huge modulated reverb in the shared FX rack (FX > SHARED: pick Massive in a slot, then raise
+each track's SEND). MIX, SIZE (about a second to about a minute, nearly endless at the top), MODE and TONE:
+HALL, NAVE (a cathedral: stone, a long predelay, dark), SPACE (huge, wide), ECHO (sparse repeats smearing into a
+cloud), CLOUD (a slow, endless bloom) and DEEP (dark and wobbling, underwater). Eight modulated delay lines at half
+rate, 30 KB while it is on; one at a time.
+
 **Knobs.** On the main page MOOG, SEM and HADES put cutoff, resonance, envelope amount and release on the four knobs
 (VOICE: VOWEL, SHIFT, BUZZ, BREATH; PULSAR: DRIVE, SNAP, SHAOS and SIZE: muffled to thunder). The filter knobs turn like a Minimoog's dial: a slow turn is one step a detent, a
 quick turn speeds up from its second detent (up to x12), so one quick turn sweeps the whole range, and the engines
