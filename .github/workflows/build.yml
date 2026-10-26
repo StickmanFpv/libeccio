@@ -1,7 +1,8 @@
 # Libeccio: build the FM-1 package with the community's shared builder (zvenson/fm1-build), which installs the JieLi
 # toolchain and SDK, builds and attests the package. Every push to main builds one: it is the run's "packages"
 # artifact (Actions > the run > Artifacts). A version tag (v0.1.0 ...) also publishes it as that tag's release.
-# Flash the .fwsc with an FM-1 web installer or tools/fm1_install.py.
+# Then the pages job puts it in a web installer on the repo's GitHub Pages (Settings > Pages > Source: GitHub Actions):
+# https://stickmanfpv.github.io/libeccio/ installs it over USB from Chrome or Edge.
 name: build
 on:
   push:
@@ -24,3 +25,30 @@ jobs:
         if [ $rc -ne 0 ]; then echo "::error title=build failed::$(tail -n 60 build.log | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')"; exit $rc; fi;
         echo "::notice title=build::$(tail -n 30 build.log | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')"
       packages: build/*.fwsc
+  pages:
+    needs: build
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: pkg
+      - name: site
+        run: |
+          pkg=$(find pkg -name '*.fwsc' | head -n 1)
+          ver=0.1.0
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then ver="${GITHUB_REF_NAME#v}"; fi
+          python3 web/libeccio_site.py "$pkg" "$ver" site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4
