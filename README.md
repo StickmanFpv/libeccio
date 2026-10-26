@@ -37,9 +37,14 @@ While SCL is held, the keys of the channels in use are lit and blink as MIDI pla
 sound you are editing is the fourth track); channels without a slot play the sound you are editing. Projects keep
 the channels. ROOT, SCALE and the chord keys stay on SCL's knobs.
 
+## Install
+
+In Chrome or Edge: **https://stickmanfpv.github.io/libeccio/**, the Melodee web installer carrying the latest build of
+`main`. Melodee's editor and manual work with Libeccio too.
+
 ## Build
 
-A push of a version tag (`v0.1.0`) builds, attests and releases the package with the shared FM-1 builder
+Every push to `main` builds the package and publishes it to the web installer. A push of a version tag (`v0.1.0`) builds, attests and releases the package with the shared FM-1 builder
 ([zvenson/fm1-build](https://github.com/zvenson/fm1-build)): download `libeccio-<version>.fwsc` from the release.
 Locally: [BUILDING.md](BUILDING.md) (the JieLi toolchain and SDK). The host tests run without them:
 `tests/run_tests.sh` after generating the headers.
