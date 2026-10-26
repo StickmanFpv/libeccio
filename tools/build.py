@@ -553,7 +553,7 @@ def main():
         except ValueError as error:
             raise SystemExit(str(error)) from error
         VERSION = "v" + a.release.lower()      # e.g. v1.0, v1.1-rc1
-        name = f"melodee-{a.release}.fwsc"
+        name = f"libeccio-{a.release}.fwsc"
     if a.nightly:
         revision = subprocess.check_output(["git", "rev-parse", "--short=7", "HEAD"], cwd=SRC, text=True).strip()
         VERSION = "next-" + revision
@@ -602,7 +602,7 @@ def main():
         rel = OUT / f"release-{a.release}"
         shutil.rmtree(rel, ignore_errors=True)
         (rel / "LICENSES").mkdir(parents=True)
-        app = f"melodee-{a.release}-app.bin"
+        app = f"libeccio-{a.release}-app.bin"
         (rel / name).write_bytes(pkg)
         (rel / app).write_bytes(img)
         (rel / "SHA256SUMS").write_text("".join(f"{hashlib.sha256(b).hexdigest()}  {n}\n"

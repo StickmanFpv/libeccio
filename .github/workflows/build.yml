@@ -1,0 +1,18 @@
+# Libeccio: build the FM-1 package with the community's shared builder (zvenson/fm1-build), which installs the JieLi
+# toolchain and SDK, builds, attests the package and, on a version tag (v0.1.0, v0.1.1-dev1 ...), publishes it as
+# that tag's release. Flash the .fwsc from the release with an FM-1 web installer or tools/fm1_install.py.
+name: build
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+jobs:
+  build:
+    uses: zvenson/fm1-build/.github/workflows/build.yml@v1
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    with:
+      build: if [[ "$GITHUB_REF" == refs/tags/v* ]]; then ./build.sh --release "${GITHUB_REF_NAME#v}"; else ./build.sh; fi
+      packages: build/*.fwsc
