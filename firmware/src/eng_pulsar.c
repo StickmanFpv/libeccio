@@ -10,8 +10,13 @@
  * SUST (the Pulsar's sustaining envelopes): above 0, a held key keeps its voice at that level, so any drum becomes a
  * drone (a kick held is a sub drone, a cymbal held a hiss bed); 0 = plain hits, the key's length does not matter.
  * DRIVE saturates each voice and the part's sum (post): from warm to pulverised.
- * Voice state: s[0] the amplitude (Q24), s[1] the pitch sweep (Q24), s[2] noise, s[3] the voice (PL_*),
- * s[4] s[5] the voice's filter. */
+ * SHAOS (after the Pulsar's SHift + chAOS): a 16-bit shift register per part, stepped once a hit. Its top bit comes
+ * back in at the bottom, flipped now and then: rarely at low SHAOS, so the variations repeat as a loop (a few bits
+ * change, the loop mutates slowly), often at high SHAOS, where it is noise. Three taps of the register vary each hit,
+ * as deep as SHAOS: the kick's pitch and drive, the snare's SNAP, pitch and drive, the metal's tuning and tone, the
+ * bass's filter and drive, and every voice's decay. SHAOS 0: every hit the same. The BASS voice decays as the KICK.
+ * Voice state: s[0] the amplitude (Q24), s[1] the pitch sweep (Q24), s[2] noise, s[3] the voice (PL_*, bits 0..7)
+ * and its three SHAOS values (signed bytes, bits 8..15, 16..23, 24..31), s[4] s[5] the voice's filter. */
 enum { PL_KICK, PL_BASS, PL_SNARE, PL_HATC, PL_HATO, PL_CYM };
 
 static uint32_t pulsar_voice_of(uint32_t note)
@@ -45,10 +50,34 @@ static inline __attribute__((always_inline)) void pulsar_svf(const tsvf_t *f, in
     *hp = in - ((k * b) >> 12) - l;
 }
 
+/* SHAOS: the parts' shift registers and the RNG that flips their bits */
+static uint16_t shaos_reg[NPART] = {0xACE1u, 0x5A3Cu, 0xC0DEu, 0x7E57u};
+static int32_t shaos_rng[NPART] = {0x2468ACE, 0x13579BD, 0x0FEDCBA, 0x7654321};
+
+/* step part's register for a hit; its three taps scaled by SHAOS (a 0..127), packed as s[3]'s bytes 1..3 */
+static uint32_t shaos_step(uint32_t part, int32_t a)
+{
+    uint32_t r, in;
+    int32_t m1, m2, m3;
+    if (part >= NPART || a <= 0)
+        return 0;
+    r = shaos_reg[part];
+    in = r >> 15;
+    if ((noise32(&shaos_rng[part]) >> 25) < (uint32_t)(a * a / 128))   /* flip odds: 0 .. 126 / 128 */
+        in ^= 1u;
+    r = ((r << 1) | in) & 0xFFFFu;
+    shaos_reg[part] = (uint16_t)r;
+    m1 = ((int32_t)(int8_t)(r & 0xFFu)) * a / 127;
+    m2 = ((int32_t)(int8_t)((r >> 5) & 0xFFu)) * a / 127;
+    m3 = ((int32_t)(int8_t)((r >> 8) & 0xFFu)) * a / 127;
+    return ((uint32_t)(uint8_t)m1 << 8) | ((uint32_t)(uint8_t)m2 << 16) | ((uint32_t)(uint8_t)m3 << 24);
+}
+static inline int32_t shaos_m(const voice_t *v, uint32_t k) { return (int32_t)(int8_t)((uint32_t)v->s[3] >> (8u * k)); }
+
 static void pulsar_note_on(track_t *t, voice_t *v)
 {
     uint32_t lane = (uint32_t)(v - t->v);
-    v->s[3] = (int32_t)pulsar_voice_of(v->note);
+    v->s[3] = (int32_t)(pulsar_voice_of(v->note) | shaos_step((uint32_t)(t - trk), t->p[P_E5]));
     v->s[0] = 1 << 24;                                    /* every hit starts at full level */
     v->s[1] = 1 << 24;                                    /* and at the top of its sweep */
     if (!v->s[2])
@@ -58,17 +87,19 @@ static void pulsar_note_on(track_t *t, voice_t *v)
     (void)t;
 }
 
-/* the decay time (ENV_EXP index) of a voice: at most about 3 s, so every hit dies away */
-static uint32_t pulsar_decay(const int16_t *p, uint32_t pv)
+/* the decay time (ENV_EXP index) of a voice: at most about 3 s, so every hit dies away; SHAOS moves it */
+static uint32_t pulsar_decay(const int16_t *p, const voice_t *v)
 {
-    switch (pv) {
-    case PL_KICK: return (uint32_t)clamp(p[P_E1], 0, 115);
-    case PL_SNARE: return (uint32_t)clamp(p[P_E3] + 6, 0, 115);
-    case PL_HATC: return (uint32_t)clamp(p[P_E4] / 2 + 22, 0, 115);
-    case PL_HATO: return (uint32_t)clamp(p[P_E4] + 12, 0, 115);
-    case PL_CYM: return (uint32_t)clamp(p[P_E4] + 34, 0, 115);
-    default: return (uint32_t)clamp(p[P_E5], 0, 115);
+    int32_t d, sh = shaos_m(v, 3) / 6;
+    switch ((uint32_t)v->s[3] & 0xFFu) {
+    case PL_KICK: d = p[P_E1]; break;
+    case PL_SNARE: d = p[P_E3] + 6; break;
+    case PL_HATC: d = p[P_E4] / 2 + 22; break;
+    case PL_HATO: d = p[P_E4] + 12; break;
+    case PL_CYM: d = p[P_E4] + 34; break;
+    default: d = p[P_E1] - 10; break;               /* BASS: as the kick */
     }
+    return (uint32_t)clamp(d + sh, 0, 115);
 }
 
 /* the voice's amplitude, once a control tick: its own decay (or SUST's hold while the key is down); the voice ends
@@ -83,7 +114,7 @@ static int32_t pulsar_amp(track_t *t, voice_t *v, int32_t adsr)
     if (v->gate && hold && e <= hold)
         e = hold;                                          /* a drone while held */
     else
-        e -= mulq16(e, ENV_EXP[pulsar_decay(p, (uint32_t)v->s[3])]);
+        e -= mulq16(e, ENV_EXP[pulsar_decay(p, v)]);
     if (e < (1 << 15)) {                                /* -54 dB: done */
         v->active = v->gate = 0;
         v->stage = 0;
@@ -119,15 +150,16 @@ static inline __attribute__((always_inline)) int32_t pulsar_grit(int32_t x, int3
 static void pulsar_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
     const int16_t *p = t->p;
-    uint32_t pv = (uint32_t)v->s[3], i;
-    int32_t sweep = v->s[1], ic1 = v->s[4], ic2 = v->s[5], dr = p[P_E6];
+    uint32_t pv = (uint32_t)v->s[3] & 0xFFu, i;
+    int32_t sweep = v->s[1], ic1 = v->s[4], ic2 = v->s[5], m1 = shaos_m(v, 1), m2 = shaos_m(v, 2);
+    int32_t dr = clamp(p[P_E6] + m2 / 3, 0, 127);
     uint32_t ph0 = v->ph[0], ph1 = v->ph[1], ph2 = v->ph[2];
     tsvf_t f;
     switch (pv) {
     case PL_KICK: {
         /* base 30..80 Hz (KICK); the sweep starts 5 octaves up and falls in about 40 ms; a noise click and a
          * square's edge on the attack, then the sine through the grit: the drive turns the tail into a growl */
-        int32_t base10 = 300 + p[P_E0] * 4;                /* Hz x 10 */
+        int32_t base10 = clamp(300 + p[P_E0] * 4 + m1 * 2, 200, 1100);   /* Hz x 10; SHAOS: +-25 Hz */
         uint32_t inc0 = pulsar_hz(base10), incs;
         int32_t sw = sweep >> 12, click = sweep > (13 << 20) ? (sweep >> 9) - 26624 : 0;   /* Q12; click Q15 */
         incs = inc0 + (uint32_t)(((uint64_t)inc0 * 31u * (uint32_t)((sw * sw) >> 12)) >> 12);
@@ -149,9 +181,9 @@ static void pulsar_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
          * the snap: noise through a resonant band that sweeps down from ~6 kHz, plus its highs; the rattle: noise
          * ring-modulated by a 410 Hz square (the metal in it). SNAP moves it from a thudding tom to a noise crack;
          * the grit runs hotter than the kick's: the snare is where the Pulsar's distortion lives */
-        int32_t snap = p[P_E2], sw = sweep >> 12, body = 32767 - snap * 180, nzl = 1500 + snap * snap * 3 / 2;
+        int32_t snap = clamp(p[P_E2] + m1 / 2, 0, 127), sw = sweep >> 12, body = 32767 - snap * 180, nzl = 1500 + snap * snap * 3 / 2;
         int32_t bamp = 9000 + (sweep >> 9), rat = (snap * (600 + dr * 12)) >> 6, k = 4096 + 700, cut;
-        uint32_t oct = (uint32_t)((sw * sw) >> 12), inc0 = pulsar_hz(1800), inc1 = pulsar_hz(2900), inc2 = pulsar_hz(4100);
+        uint32_t oct = (uint32_t)((sw * sw) >> 12), inc0 = pulsar_hz(1800 + m2 * 4), inc1 = pulsar_hz(2900 + m2 * 6), inc2 = pulsar_hz(4100 + m1 * 8);
         inc0 += (uint32_t)(((uint64_t)inc0 * oct) >> 12);
         inc1 += (uint32_t)(((uint64_t)inc1 * oct) >> 12);
         cut = clamp((82 << 8) + (sweep >> 11) * 4, 0, 125 << 8);   /* the crack sweeps down into the mids */
@@ -178,8 +210,8 @@ static void pulsar_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
         uint32_t inc[6], j, c = ph0;
         int32_t k = 4096 + 1024;
         for (j = 0; j < 6; j++)
-            inc[j] = pulsar_hz(PL_METAL[j] * (pv == PL_CYM ? 3u : 4u) / 4u);
-        tsvf_coef_k(&f, (pv == PL_CYM ? 112 : 118) << 8, k);
+            inc[j] = pulsar_hz((int32_t)PL_METAL[j] * (pv == PL_CYM ? 3 : 4) / 4 * (256 + m1) / 256);   /* SHAOS: +-50 % */
+        tsvf_coef_k(&f, clamp((pv == PL_CYM ? 112 : 118) * 256 + m2 * 24, 90 << 8, 125 << 8), k);
         for (i = 0; i < n; i++, c++) {
             int32_t sum = 0, nz = (int32_t)(noise32(&v->s[2]) >> 17) - 16384, lp, bp, hp, s;
             for (j = 0; j < 6; j++)
@@ -196,7 +228,7 @@ static void pulsar_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, cons
          * that opens with the sweep and the drive, then the grit */
         int32_t sw = sweep >> 12, cut, k = 4096 + 1100;
         uint32_t inc0 = m->inc + (uint32_t)(((uint64_t)m->inc * (uint32_t)((sw * sw) >> 12)) >> 12);
-        cut = clamp(44 * 256 + (sweep >> 11) * 5 + dr * 64, 0, 127 * 256);
+        cut = clamp(44 * 256 + (sweep >> 11) * 5 + dr * 64 + m1 * 40, 0, 127 * 256);
         tsvf_coef_k(&f, cut, k);
         for (i = 0; i < n; i++) {
             int32_t sq = (int32_t)(ph0 >> 31) ? -24000 : 24000, s, lp, bp, hp;
@@ -237,31 +269,33 @@ static void pulsar_post(track_t *t, int32_t *out, uint32_t n, uint32_t nr)
 }
 
 static const preset_t PULSAR_PRESETS[] = {
-    /* name, {KICK, K.DEC, SNAP, S.DEC, METAL, B.DEC, DRIVE, SUST}, {A D S R}, fenv, mono */
-    {"PULSAR", {48, 94, 70, 74, 66, 84, 60, 0}, {0, 127, 127, 127}, 0, 0},
-    {"PULVERISE", {40, 98, 90, 80, 72, 88, 118, 0}, {0, 127, 127, 127}, 0, 0},
-    {"DEEP SUB", {20, 108, 50, 70, 60, 100, 46, 0}, {0, 127, 127, 127}, 0, 0},
-    {"TIGHT", {64, 80, 60, 62, 46, 70, 40, 0}, {0, 127, 127, 127}, 0, 0},
-    {"DRONE", {30, 100, 80, 82, 84, 96, 80, 90}, {0, 127, 127, 127}, 0, 0},
-    {"NOISE BED", {50, 92, 120, 92, 104, 84, 96, 60}, {0, 127, 127, 127}, 0, 0},
+    /* name, {KICK, K.DEC, SNAP, S.DEC, METAL, SHAOS, DRIVE, SUST}, {A D S R}, fenv, mono */
+    {"PULSAR", {48, 94, 70, 74, 66, 0, 60, 0}, {0, 127, 127, 127}, 0, 0},
+    {"PULVERISE", {40, 98, 90, 80, 72, 30, 118, 0}, {0, 127, 127, 127}, 0, 0},
+    {"DEEP SUB", {20, 108, 50, 70, 60, 0, 46, 0}, {0, 127, 127, 127}, 0, 0},
+    {"TIGHT", {64, 80, 60, 62, 46, 0, 40, 0}, {0, 127, 127, 127}, 0, 0},
+    {"DRONE", {30, 100, 80, 82, 84, 50, 80, 90}, {0, 127, 127, 127}, 0, 0},
+    {"NOISE BED", {50, 92, 120, 92, 104, 80, 96, 60}, {0, 127, 127, 127}, 0, 0},
+    {"ORGANISM", {44, 96, 76, 78, 70, 64, 84, 0}, {0, 127, 127, 127}, 0, 0},
+    {"SHAOS", {40, 100, 96, 84, 86, 116, 100, 0}, {0, 127, 127, 127}, 0, 0},
 };
 
 static const engine_t ENG_PULSAR = {
     .name = "PULSAR",
-    .page_title = {"KICK SNARE", "METAL BASS"},
+    .page_title = {"KICK SNARE", "METAL CHAOS"},
     .edit = {
         {"KICK", F_PCT, 0, 127, 48, 0, 0},
         {"K.DEC", F_TIME, 0, 127, 94, 0, 0},
         {"SNAP", F_PCT, 0, 127, 70, 0, 0},
         {"S.DEC", F_TIME, 0, 127, 74, 0, 0},
         {"METAL", F_TIME, 0, 127, 66, 0, 0},
-        {"B.DEC", F_TIME, 0, 127, 84, 0, 0},
+        {"SHAOS", F_PCT, 0, 127, 0, 0, 0},
         {"DRIVE", F_PCT, 0, 127, 60, 0, 0},
         {"SUST", F_PCT, 0, 127, 0, 0, 0},
     },
     .presets = PULSAR_PRESETS,
     .npresets = NELEM(PULSAR_PRESETS),
-    .knob = {P_E6, P_E1, P_E2, P_E7},
+    .knob = {P_E6, P_E2, P_E5, P_E7},    /* DRIVE, SNAP, SHAOS, SUST */
     .poly = 8,
     .oneshot = 1,
     .note_on = pulsar_note_on,
