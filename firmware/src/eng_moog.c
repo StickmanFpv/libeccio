@@ -35,13 +35,13 @@ static const moog_osc_t MOOG_OSC[] = {
     {"WIDE", {2, 2, 1}, {4, 5, 2}, 11, -8, {108, 104, 76}, 0},
     {"OCTAVES", {1, 2, 3}, {2, 2, 2}, 4, -4, {104, 100, 92}, 0},
     {"SAW", {2, 2, 2}, {2, 2, 2}, 0, 0, {116, 0, 0}, 0},               /* one oscillator */
-    {"SQUARE", {2, 2, 2}, {3, 3, 3}, 0, 0, {116, 0, 0}, 0},
+    {"SQR", {2, 2, 2}, {3, 3, 3}, 0, 0, {116, 0, 0}, 0},
     {"THIN", {3, 3, 3}, {5, 5, 5}, 6, 0, {112, 90, 0}, 0},
     {"NOISE", {3, 3, 3}, {0, 0, 0}, 0, 0, {40, 0, 0}, 120},
 };
 #define MOOG_NOSC NELEM(MOOG_OSC)
 static const char *const N_MOOG_OSC[MOOG_NOSC] = {"CLASSIC", "FAT", "SUB", "LEAD", "FIFTH", "BRASS", "HOLLOW", "FLUTE",
-                                                  "SHARK", "WIDE", "OCTAVES", "SAW", "SQUARE", "THIN", "NOISE"};
+                                                  "SHARK", "WIDE", "OCTAVES", "SAW", "SQR", "THIN", "NOISE"};
 
 static int32_t moog_sm[NPART][3];                 /* the smoothed CUT, EMPH, CNTR knobs (Q16): the encoder's steps become ramps */
 static uint8_t moog_sm_ok;                        /* bit p: moog_sm[p] follows the knobs (clear = snap to them) */

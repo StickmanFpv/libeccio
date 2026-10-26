@@ -4164,28 +4164,56 @@ static int test_quick_layers(void)
     bad += check("GLO + PLAY: RESTART playing (from the top, not stopped); stopped: PLAY", ok);
     usb.config = 0;
 
-    /* SCL: a key is ROOT, KNOB 2 the scale, the LEDs, OCT- */
+    /* fork: SCL held, the MIDI slots (midi_slots.c): a white key is a channel */
     ui_power_on();
-    TSEL->p[P_ROOT] = 0; TSEL->p[P_SCALE] = 1;                     /* C MAJ */
-    lay_combo(B_SCL, black(4));                                    /* D#4 */
-    ok = TSEL->p[P_ROOT] == 3 && ui.layer == LAYER_SCL && !gates();
-    key_up(black(4)); frame();
-    key_down(white(1)); key_up(white(1)); frame();                  /* G3 */
-    ok &= TSEL->p[P_ROOT] == 7;
-    turn(EN_K2, 1);
-    ok &= TSEL->p[P_SCALE] == 2;
-    a = leds_at(0); b2 = leds_at(250);
-    ok &= ((a & b2) >> white(1)) & 1u && ((a & b2) >> white(8)) & 1u;   /* G3 G4: the root, lit */
-    ok &= ((a ^ b2) >> white(2)) & 1u && ((a ^ b2) >> black(4)) & 1u;   /* A, A# (G minor): blink */
-    ok &= !(((a | b2) >> black(0)) & 1u);                               /* F#: not in G minor, dark */
+    memset(slot_ch, 0, sizeof slot_ch);
+    set_engine_of(TSEL, ENGI_MOOG);
+    btn_down(B_SCL); frame();
+    key_down(white(14)); frames(100); key_up(white(14)); frame();   /* a tap on 15 */
+    ok = ui.layer == LAYER_SCL && !gates() && trk_n() >= 2u && slot_ch[1] == 15u && trk[1].eng_req == ENGI_MOOG &&
+         song.sel == 0u && msg_is("CH 15: MOOG");
+    ok &= midi_track(14) == &trk[1] && midi_track(0) == TSEL && midi_track(9) == TSEL;   /* the rest: the scratch */
+    set_engine_of(TSEL, ENGI_SEM);
+    song.octave = 1;
+    key_down(white(7)); frames(100); key_up(white(7)); frame();     /* 8: the SEM, an octave up */
+    ok &= slot_ch[2] == 8u && trk[2].eng_req == ENGI_SEM && trk[2].p[P_TRANS] == 12 && trk[1].eng_req == ENGI_MOOG;
+    song.octave = 0;
+    {
+        uint32_t a2;
+        memset((void *)slot_act, 0, sizeof slot_act);   /* (the midi_track calls above: no blink now) */
+        a2 = layer_leds();
+        ok &= (a2 >> white(14)) & 1u && (a2 >> white(7)) & 1u && !((a2 >> white(0)) & 1u);
+    }
     btn_up(B_SCL); frame();
-    bad += check("SCL + D#4, then G3: ROOT D#, G (latched); KNOB 2: SCL; LEDs: root lit, the scale blinks", ok &&
-                 TSEL->p[P_ROOT] == 7 && TSEL->p[P_SCALE] == 2 && ui.home);
-    btn_down(B_SCL); frame(); key_down(white(4)); key_up(white(4)); frame(); turn(EN_K2, 3);
-    ok = TSEL->p[P_ROOT] == 0 && TSEL->p[P_SCALE] == 5;
-    oct_back();
+    bad += check("SLOTS: SCL + a white key: the scratch's sound to that channel (MOOG on 15, SEM an octave up on 8), "
+                 "the keys silent, MIDI on 15 / 8 plays them, the rest the scratch; their keys lit", ok);
+    btn_down(B_SCL); frame();
+    key_down(white(14)); frames(700);                              /* held: 15's sound to the scratch */
+    ok = TSEL->eng_req == ENGI_MOOG && slot_ch[1] == 15u;
+    frames(1600);                                                  /* held on: 15 cleared */
+    ok &= slot_ch[1] == 0u && msg_is("CH 15: CLEARED");
+    key_up(white(14)); frame();
+    ok &= slot_ch[1] == 0u && TSEL->eng_req == ENGI_MOOG;          /* (the release assigns nothing) */
     btn_up(B_SCL); frame();
-    bad += check("  OCT- in SCL: ROOT and SCL as the layer opened", ok && TSEL->p[P_ROOT] == 7 && TSEL->p[P_SCALE] == 2);
+    bad += check("SLOTS: a channel key held: its sound into the scratch; held 2 s: the channel cleared", ok);
+    {
+        project_t *pj = &proj_scratch;
+        project_capture(pj);
+        ok = pj->t[2].p[P_SLOTCH] == 108 && pj->t[1].p[P_SLOTCH] == 0;
+        memset(slot_ch, 0, sizeof slot_ch);
+        ok &= !project_restore_runtime(pj) && slot_ch[2] == 8u && !slot_ch[1] && trk[2].p[P_SLOTCH] == 0;
+        bad += check("SLOTS: a project keeps the channels (P_SLOTCH 100 + channel)", ok);
+    }
+    btn_down(B_SCL); frame();
+    key_down(white(0)); frames(100); key_up(white(0)); frame();      /* 1 */
+    key_down(white(1)); frames(100); key_up(white(1)); frame();      /* 2 */
+    key_down(white(2)); frames(100); key_up(white(2)); frame();      /* 3: no place left */
+    ok = msg_is("SLOTS FULL: TAP A LIT KEY") && slot_of_ch(3) == NTRK;
+    key_down(white(1)); frames(100); key_up(white(1)); frame();      /* a lit one: replaced */
+    ok &= slot_of_ch(2) < NPART;
+    btn_up(B_SCL); frame();
+    bad += check("SLOTS: three slots (the scratch the fourth track); full: a lit key replaces", ok);
+    memset(slot_ch, 0, sizeof slot_ch);
 
     /* no layer in the menu or a dialog: GLO + a key plays */
     ui_power_on(); hold(B_HOME);
@@ -4309,7 +4337,7 @@ static int test_bughunt_ui(void)
         btn_down(B_SCL); frames(500);
         turn(EN_ALGO, 1);
         ok = ui.layer == LAYER_SCL && song.sel == 0u;
-        key_down(white(1)); frame(); key_up(white(1)); frame();   /* ROOT on T1 */
+        turn(EN_K1, 2);                                  /* ROOT on T1 (SCL's KNOB 1) */
         ok &= trk[0].p[P_ROOT] != r0;
         oct_back();
         ok &= trk[0].p[P_ROOT] == r0;

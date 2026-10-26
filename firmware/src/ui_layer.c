@@ -27,7 +27,7 @@ static const layer_t LAYERS[LAYER_N] = {
     {0, 0, 0, "", {{0, 0}, {0, 0}, {0, 0}}},
     {B_FX, LK_HOLD, FAM_FX, "[FX] HOLD", {{KC_KEYS, "PUNCH"}, {0, 0}, {0, 0}}},
     {B_GLO, LK_SET, FAM_HOME, "[GLO] SET", {{KC_PLAY, "RESTART"}, {KC_OCTDN, "UNDO"}, {KC_GLO, "DONE"}}},
-    {B_SCL, LK_SET, FAM_SCL, "[SCL] SET", {{KC_KEYS, "ROOT"}, {KC_OCTDN, "UNDO"}, {KC_SCL, "DONE"}}},
+    {B_SCL, LK_SET, FAM_SCL, "[SCL] SLOTS", {{KC_KEYS, "CHANNEL"}, {KC_OCTDN, "UNDO"}, {KC_SCL, "DONE"}}},
 };
 /* SCL's knobs: the key and its chord (cur_page() while the layer edits or draws them: page_over) */
 static const page_t LY_SCL = {"SCL", FAM_SCL, SC_TRACK, GR_SCALE, {P_ROOT, P_SCALE, P_CHRD, P_VOIC}};
@@ -46,6 +46,11 @@ static struct {
 } lys;
 
 static const uint32_t LY_DTAP_MS=300u;
+/* fork: the MIDI slots (midi_slots.c, after tracks.c) */
+static uint32_t slot_of_ch(uint32_t ch);
+static void slot_key_down(uint32_t k, uint32_t p);
+static void slot_tick(uint32_t held);
+static uint32_t slot_leds(void);
 
 
 
@@ -236,9 +241,9 @@ static void layer_key(uint32_t l, uint32_t k)
         } else if (p == 7u) {
             glo_tap();
         }
-    } else if (l == LAYER_SCL) {
-        TSEL->p[P_ROOT] = (int16_t)((k + 5u) % 12u);    /* the key's note name (F3 = F) */
-        scale_share(TSEL);
+    } else if (l == LAYER_SCL) {                        /* fork: the white keys are MIDI channels 1..16 (midi_slots.c) */
+        if (!key_black(k))
+            slot_key_down(k, p);
     }
 }
 /* each pass: the keys the layer got now; then GLO's solo: the tracks of its keys still held (perform.c) */
@@ -248,6 +253,7 @@ static void layer_keys(uint32_t keys)
     for (k = 0; keys && k < 27u; k++)
         if ((keys >> k) & 1u)
             layer_key(l, k);
+    slot_tick(kb_layer);                                /* fork: a channel key's hold and release */
     lys.solo &= kb_layer;
     for (k = 0; k < 27u; k++)
         if ((lys.solo >> k) & 1u)
@@ -330,6 +336,7 @@ static uint32_t layer_leds(void)
 {
     uint32_t k, m = 0, blink = ((fm1_ms / 250u) & 1u) == 0u, l = ui.layer;
     uint32_t mask = scale_mask(TSEL), root = (uint32_t)TSEL->p[P_ROOT] % 12u;
+    uint32_t slot_leds_now = l == LAYER_SCL ? slot_leds() : 0u;
     for (k = 0; k < 27u; k++) {
         uint32_t p = key_place(k), b = (uint32_t)key_black(k), on = 0, e;
         if (l == LAYER_FX) {
@@ -339,9 +346,9 @@ static uint32_t layer_leds(void)
             on = b ? t < trk_n() && glo_sounding(t) :
                  p < NPART ? t < trk_n() && (((lys.solo >> k) & 1u) | blink) : p == 4u ? blink :
                  p == 7u && !song.g[G_CLOCK] && blink;
-        } else if (l == LAYER_SCL) {                    /* the root lit, the scale's notes blink */
-            e = (k + 5u + 12u - root) % 12u;
-            on = e == 0u || (((mask >> e) & 1u) && blink);
+        } else if (l == LAYER_SCL) {                    /* fork: the channels in use (midi_slots.c) */
+            (void)e; (void)mask; (void)root;
+            on = (slot_leds_now >> k) & 1u;
         }
         m |= on << k;
     }
@@ -373,22 +380,37 @@ static uint16_t lc_fill(uint32_t st, uint16_t *ink)
     }
     return T_RAISE;
 }
-static void layer_scl(void)                             /* KNOB 2's scales as a list (their names in full), four
-                                                         * around the one now selected (filled) */
+static void layer_scl(void)                             /* fork: the MIDI slots (midi_slots.c): the white keys as
+                                                         * channels 1..16 in two rows, those in use in their track's
+                                                         * colour; under them what each plays */
 {
-    uint32_t i, sc = (uint32_t)TSEL->p[P_SCALE], max = (uint32_t)TP[P_SCALE].max, first;
-    first = sc > 1u ? sc - 1u : 0u;
-    if (max >= 3u && first > max - 3u)
-        first = max - 3u;
-    for (i = first; i < first + 4u && i <= max; i++) {
-        int32_t y = 3 + 30 * (int32_t)(i - first);
-        uint16_t ink, fill = lc_fill(i == sc ? LS_SEL : LS_OFF, &ink);
-        const char *t = SCALE_TITLE[i];
-        const aafont_t *f = ty_fit(TY_TX, t, 200);
-        if (i == sc)
-            cv_rrect(8, y, 224, 28, 8, fill, T_SURF);
-        cv_free_text(18, ty_y(y + 14, f), f, t, i == sc ? ink : T_SEC, i == sc ? fill : T_SURF, 200);
+    uint32_t c, n = 0;
+    char line[48];
+    line[0] = 0;
+    for (c = 0; c < 16u; c++) {
+        int32_t x = 6 + (int32_t)(c % 8u) * 29, y = 6 + (int32_t)(c / 8u) * 40;
+        uint32_t s = slot_of_ch(c + 1u);
+        uint16_t f = s < NPART ? T_TRK(s) : T_RAISE, ink = s < NPART ? T_INK : T_SEC;
+        char d[3];
+        fmt_int(d, (int32_t)(c + 1u));
+        cv_rrect(x, y, 26, 34, 5, f, T_SURF);
+        cv_text_c(x + 13, ty_y(y + 17, TY_LB), TY_LB, d, ink, f);
     }
+    for (c = 1; c <= 16u && n < 3u; c++) {
+        uint32_t s = slot_of_ch(c);
+        char d[4];
+        if (s >= NPART)
+            continue;
+        if (n)
+            str_cpy(line + str_len(line), "  ", sizeof line - str_len(line));
+        fmt_int(d, (int32_t)c);
+        str_cpy(line + str_len(line), d, sizeof line - str_len(line));
+        str_cpy(line + str_len(line), " ", sizeof line - str_len(line));
+        str_cpy(line + str_len(line), ENGINES[trk[s].eng_req % NENGINES]->name, sizeof line - str_len(line));
+        n++;
+    }
+    cv_free_text(10, ty_y(104, TY_LB), TY_LB, n ? line : "Tap a key to assign", n ? T_TEXT : T_SEC,
+                 T_SURF, 216);
 }
 /* GLO held (docs/design: mock/r6_pages GLO): the keys as a keyboard: the black keys MUTE 1..4 (muted: red), the white
  * keys SOLO 1..4 (held: the track's colour), C unmutes all, the high F taps the tempo (an outside clock: dim). The
@@ -696,8 +718,9 @@ static void draw_layer(void)
         sig += track_solo * 31u + (uint32_t)song.g[G_CLOCK] * 5u + trk_n() * 40503u + trk_group() * 7u +
                (uint32_t)(trk[trk_group()].p[P_MUTE] | trk[trk_group() + 1u].p[P_MUTE] << 1 |
                           trk[trk_group() + 2u].p[P_MUTE] << 2 | trk[trk_group() + 3u].p[P_MUTE] << 3) * 131u;
-    else if (l == LAYER_SCL)
-        sig += (uint32_t)TSEL->p[P_SCALE] * 31u;
+    else if (l == LAYER_SCL)                            /* fork: the slots' channels and engines */
+        for (c = 0; c < NPART; c++)
+            sig += ((uint32_t)slot_ch[c] * 31u + trk[c].eng_req * 7u + 1u) * (c * 977u + 13u);
 
     if (l == LAYER_GLO) {                               /* (R6: levels at the top, the keys as a keyboard under them) */
         if (ui.force || sig != ui.layer_sig) {

@@ -682,6 +682,7 @@ static void project_capture(project_t *p)
         if (src < NTRK) {
             const track_t *t = &trk[src];
             for (uint32_t j = 0; j < P_COUNT; j++) p->t[i].p[j] = motion_base_value(t, j);
+            p->t[i].p[P_SLOTCH] = src < NPART && slot_ch[src] ? (int16_t)(100 + slot_ch[src]) : 0;   /* fork */
             p->t[i].engine = t->eng_req;
             p->t[i].mpc_octave = t->mpc_octave;
             p->t[i].preset = t->preset;
@@ -941,6 +942,7 @@ static int project_restore_runtime(const project_t *input)
             const param_desc_t *d = param_desc_of(e, i);
             t->p[i] = param_reserved(i) ? 0 : eng_extra_retired(e) && i >= P_E0 ? s->p[i] : (int16_t)clamp(s->p[i], d->min, d->max);
         }
+        slot_ch[k] = (uint8_t)(k < NPART && s->p[P_SLOTCH] >= 101 && s->p[P_SLOTCH] <= 116 ? s->p[P_SLOTCH] - 100 : 0);
         track_fx_normalize(t->p);
         t->preset = eng_extra_retired(e) ? s->preset : (uint8_t)(ENGINES[e]->npresets ? (s->preset >= PROJ_DEF_KEEP ? 0u : s->preset) % ENGINES[e]->npresets : 0u);
         t->pattern = p->pattern[k];
@@ -1363,6 +1365,7 @@ static void project_boot(void)
     song.g[G_SLOT] = (int16_t)(project_free_slot() + 1u);
 }
 #include "tracks.c"                               /* adding and removing tracks */
+#include "midi_slots.c"                           /* fork: one MIDI channel per sound (SCL held) */
 #if MELODEE_FLASH && MELODEE_SLICE
 #include "slice_store.c"                          /* SLICE's MAN slices, kept in the user slots */
 #endif

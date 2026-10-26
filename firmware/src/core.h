@@ -530,6 +530,13 @@ typedef struct {
 } song_t;
 
 static track_t trk[NTRK];        /* the instrument: four parts, then the MIDI-only tracks */
+/* fork: MIDI slots (midi_slots.c): the MIDI channel each synth track listens on, 0 none, 1..16. When any is set, MIDI
+ * IN goes by these instead of ROUT, and channels without a slot play the selected track (the scratch). Projects keep
+ * them in each track's P_SLOTCH as 100 + channel (an old project's inert value there reads as none) */
+#define P_SLOTCH P_RESERVED48
+static uint8_t slot_ch[NTRK];
+static volatile uint8_t slot_act[NTRK];   /* MIDI seen on the slot's channel lately: the UI's blink (counts down) */
+static int slots_on(void) { for (uint32_t k = 0; k < NPART; k++) if (slot_ch[k]) return 1; return 0; }
 static voice_t part_voice[NPART][NVOICE];
 static voice_t midi_voice[NVOICE];   /* shared by the MIDI-only tracks: never started (their notes go out as MIDI) */
 static void trk_voices_bind(void)    /* boot, and a host fixture after clearing trk: every voice silent */

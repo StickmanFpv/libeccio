@@ -1242,6 +1242,14 @@ static track_t *midi_track(uint32_t ch)
 {
     uint32_t k, route = (uint32_t)song.g[G_ROUTE];
     uint32_t first = route > 1u ? (route - 1u) * 4u : 0u;
+    if (slots_on()) {                                  /* fork: the slots (midi_slots.c); the rest: the scratch */
+        for (k = 0; k < NPART && k < trk_n(); k++)
+            if (slot_ch[k] == ch + 1u && k != song.sel) {
+                slot_act[k] = 12;
+                return &trk[k];
+            }
+        return TSEL;
+    }
     if (route != 1u && (ch < first || ch - first >= 4u))
         return 0;
     if (settings_drumch && ch + 1u == settings_drumch) {
