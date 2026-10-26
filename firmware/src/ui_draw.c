@@ -668,6 +668,7 @@ static void draw_foot(void)
 }
 #include "ui_sections.c"                                /* the EDIT pages in sections, the map */
 #include "ui_stage.c"                                   /* Stage (HOME) */
+#include "ui_libeccio.c"                                /* fork: Libeccio's HOME in Stage's place */
 #include "ui_view.c"                                    /* HOME's second page: the chord, pictures of what plays */
 #include "ui_browser.c"                                 /* SAVE > PRESETS, the sound browser */
 #include "ui_patterns.c"                                /* SEQ > PATTERNS, SEQ > SONG */
@@ -1164,8 +1165,8 @@ static void draw_page(void)
         melodee_dbg.stage = 5;
         if (ui.home && ui.home_pg)                      /* HOME's second page (ui_view.c) */
             view_draw();
-        else if (ui.home)                               /* Stage: its panel and the lanes (ui_stage.c), no footer */
-            stage_draw();
+        else if (ui.home)                               /* fork: Libeccio's HOME (ui_libeccio.c; Stage's rows unused) */
+            lh_stage ? stage_draw() : lh_draw();
         else
             draw_graph();
     }

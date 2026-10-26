@@ -921,6 +921,7 @@ static int test_track_count(void)
                  TRK_DEF[3][0] == ENGI_DRUM);
     bad += check("  NEW SONG without a template: all four", template_tracks() == NPART);
     song.ntrk = 1;                                      /* (a song down to one track) */
+    lh_stage = 1;                                       /* fork: Melodee's Stage (Libeccio's HOME: test_libeccio_home) */
     ui.force = 1; frame();
     bad += check("UNUSED TRACKS SHOW: four rows, the places not in use greyed (Add track)", stage_rows() == NPART &&
                  st_row_h() == (ST_ROWS_H - 6) / 4 && stage.col[1] && stage.col[3]);
@@ -930,6 +931,7 @@ static int test_track_count(void)
                  (GLO_SELECT & TRACKS_HIDE) && stage_rows() == 1u && st_row_h() == ST_ROWS_H);
     hold(B_HOME); ui.menu_sel = MI_TRACKS; turn(EN_K1, -1); hold(B_HOME);
     bad += check("  KNOB 1 left: SHOW again", !(GLO_SELECT & TRACKS_HIDE) && stage_rows() == NPART && ui.home);
+    lh_stage = 0;
     bad += check("  no pattern at all: Stage's card shows no pattern pill, no steps (a synth)", stage_seq_idle(0));
     one_note(&trk[0], 3, 60);
     ok = !stage_seq_idle(0);
@@ -4946,6 +4948,40 @@ static int test_stage(void)
     return bad;
 }
 
+/* fork: Libeccio's HOME (ui_libeccio.c): the sound card, the four knobs (their rings follow the value), the slots by
+ * channel; nothing sent while it rests; a slot lit while MIDI plays it */
+static int test_libeccio_home(void)
+{
+    int bad = 0;
+    uint32_t k0, c[2];
+    uint64_t s0;
+    ui_power_on();
+    track_select(0);
+    set_engine_of(&trk[0], ENGI_MOOG); apply_preset_to(&trk[0], 0);
+    if (song.ntrk < 3u) song.ntrk = 3u;
+    set_engine_of(&trk[1], ENGI_SEM); slot_ch[1] = 15;
+    set_engine_of(&trk[2], ENGI_HADES); slot_ch[2] = 8;
+    go_home(); ui.force = 1; frame(); frame();
+    frames(2000);                                       /* (the knobs' drop-in time over) */
+    bad += check("Libeccio HOME: the card, the knobs and two slots drawn, SEM's channel 15 after HADES' 8",
+                 lh.card && lh.knob[0] && lh.knob[3] && lh.slot[0] && lh.slot[1] && lh_slots(c) == 2u && c[0] == 2u && c[1] == 1u);
+    frames(4);
+    s0 = host_sent;
+    k0 = lh.knob[0];
+    frames(2000);
+    bad += check("  at rest: nothing sent", host_sent == s0);
+    turn(EN_K1, 3); frame(); frame();
+    bad += check("  a knob turned: its ring redrawn", lh.knob[0] != k0);
+    k0 = lh.slot[1];
+    slot_act[1] = 12; frame();
+    bad += check("  MIDI on channel 15: its slot lit", lh.blink[1] && lh.slot[1] != k0);
+    frames(300);
+    bad += check("  .. and dark again after", !lh.blink[1]);
+    memset(slot_ch, 0, sizeof slot_ch);
+    ui_power_on();
+    return bad;
+}
+
 /* Stage's knobs after DRUM SOUND (the page HOME keeps): Stage's cards alone, nothing sent while they rest (last in
  * main: its frames move the clock the breathing checks read) */
 static int test_stage_knobs_after_drum(void)
@@ -4954,6 +4990,7 @@ static int test_stage_knobs_after_drum(void)
     uint32_t k;
     uint64_t s0;
     ui_power_on();
+    lh_stage = 1;                                       /* fork: Melodee's Stage */
     track_select(3);
     set_engine_of(TSEL, ENGI_DRUM);
     go_title("DRUM SOUND");
@@ -4967,6 +5004,7 @@ static int test_stage_knobs_after_drum(void)
     frames(160);
     bad += check("Stage after DRUM SOUND: the knobs out, not redrawn over the page's cards each frame",
                  stage.out && host_sent == s0 && memcmp(ui.col[0], "DRUM|", 5));
+    lh_stage = 0;
     ui_power_on();
     return bad;
 }
@@ -5836,6 +5874,7 @@ int main(void)
     bad += test_bughunt_ui2();
     bad += test_piano_roll();
     bad += test_fm6_charts();
+    bad += test_libeccio_home();
     bad += test_stage_knobs_after_drum();
 
     if (getenv("UI_SCREEN_DIR")) chain_screens(getenv("UI_SCREEN_DIR"));

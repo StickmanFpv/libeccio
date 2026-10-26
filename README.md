@@ -22,6 +22,10 @@ test suite; CPU load on the FM-1 is not measured yet. Keep a backup and the offi
 
 They come first in the sound browser; Melodee's PROPHET, FM6, CZ-1, SID and DRUM follow.
 
+**Home screen.** The sound you are editing on top (its voice mode, the keys' octave, EDIT or its MIDI channel), the
+four knobs always shown as rings of dots, and under them the MIDI channels in use, each lit as the KO II plays it.
+Melodee's track rows give way to it (the sequencer pages are all still there).
+
 **Knobs.** On the main page MOOG, SEM and HADES put cutoff, resonance, envelope amount and release on the four knobs
 (PULSAR: DRIVE, SNAP, SHAOS and SIZE: muffled to thunder). The filter knobs turn like a Minimoog's dial: a slow turn is one step a detent, a
 quick turn speeds up from its second detent (up to x12), so one quick turn sweeps the whole range, and the engines
