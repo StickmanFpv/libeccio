@@ -24,6 +24,7 @@ static const char *const PRESET_CAT[NENGINES] = {
     [ENGI_MIDI] = "O",                                  /* non-audio destination: OTHER */
     [ENGI_SEM] = "RPSBPLPK",                            /* SEM: BRASS PAD STRING BASS PAD LEAD PAD KEYS */
     [ENGI_HADES] = "BBBBBBUL",                          /* HADES: basses, DARK PLK, RAW LEAD */
+    [ENGI_MOOG] = "BBLLRPWULB",                         /* MOOG */
 #if MELODEE_LEGACY_EXTRAS                                /* (retired: PHASE VOICE NOISE) */
     [2] = "RGSLEU",                                     /* PHASE: BRASS ORGAN STRING RESO BELL WIRE */
     [5] = "PLBF",                                       /* VOICE: CHOIR AAH, VOX LEAD, WOW BASS, WHISPER */
