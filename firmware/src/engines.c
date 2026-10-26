@@ -239,7 +239,19 @@ static uint32_t eng_step(uint32_t e, int32_t dir)
 /* the parts at power-on and in a new song (engine, preset; the steps empty): poly, bass, lead, drums. IT'S A
  * PROPHET 5, FM6 SOLID BASS, CZ-1 SYNTH.LEAD 1, 808 KIT (until 2026-10-16: PROPHET FUNK BASS II, FM6 PAD, SID INIT
  * SID, 808 KIT) */
-static const uint8_t TRK_DEF[NPART][2] = {{ENGI_PROPHET, 1}, {ENGI_FM6, 10}, {ENGI_CZ, 52}, {ENGI_DRUM, 0}};
+/* fork: Libeccio's own engines: MOOG MINI BASS, SEM WARM PAD, HADES DEEP SUB, PULSAR. Melodee's (It's a Prophet 5,
+ * FM6 SOLID BASS, CZ-1 SYNTH.LEAD 1, 808 KIT) stay for its own tests, which are written around them
+ * (LIBECCIO_MELODEE_DEFAULTS: tests/hostsim.c) */
+static const uint8_t TRK_DEF_LIBECCIO[NPART][2] = {{ENGI_MOOG, 0}, {ENGI_SEM, 1}, {ENGI_HADES, 0}, {ENGI_PULSAR, 0}};
+static const uint8_t TRK_DEF_MELODEE[NPART][2] = {{ENGI_PROPHET, 1}, {ENGI_FM6, 10}, {ENGI_CZ, 52}, {ENGI_DRUM, 0}};
+#ifndef LIBECCIO_MELODEE_DEFAULTS
+#define LIBECCIO_MELODEE_DEFAULTS 0
+#endif
+#if LIBECCIO_MELODEE_DEFAULTS
+#define TRK_DEF TRK_DEF_MELODEE
+#else
+#define TRK_DEF TRK_DEF_LIBECCIO
+#endif
 /* track k's power-on engine and preset: TRK_DEF's, a MIDI-only track the MIDI Track's */
 static uint32_t trk_def_engine(uint32_t k) { return k < NPART ? TRK_DEF[k][0] : ENGI_MIDI; }
 static uint32_t trk_def_preset(uint32_t k) { return k < NPART ? TRK_DEF[k][1] : 0u; }

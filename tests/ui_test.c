@@ -4955,6 +4955,11 @@ static int test_libeccio_home(void)
     int bad = 0;
     uint32_t k0, c[2];
     uint64_t s0;
+    bad += check("Libeccio's power-on tracks: MOOG MINI BASS, SEM WARM PAD, HADES DEEP SUB, PULSAR",
+                 TRK_DEF_LIBECCIO[0][0] == ENGI_MOOG && TRK_DEF_LIBECCIO[0][1] == find_preset(ENGI_MOOG, "MINI BASS") &&
+                 TRK_DEF_LIBECCIO[1][0] == ENGI_SEM && TRK_DEF_LIBECCIO[1][1] == find_preset(ENGI_SEM, "WARM PAD") &&
+                 TRK_DEF_LIBECCIO[2][0] == ENGI_HADES && TRK_DEF_LIBECCIO[2][1] == find_preset(ENGI_HADES, "DEEP SUB") &&
+                 TRK_DEF_LIBECCIO[3][0] == ENGI_PULSAR && TRK_DEF_LIBECCIO[3][1] == find_preset(ENGI_PULSAR, "PULSAR"));
     ui_power_on();
     track_select(0);
     set_engine_of(&trk[0], ENGI_MOOG); apply_preset_to(&trk[0], 0);
